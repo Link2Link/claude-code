@@ -261,8 +261,12 @@ const yoloClassifierResponseSchema = lazySchema(() =>
 
 export const YOLO_CLASSIFIER_TOOL_NAME = 'classify_result'
 
+// type omitted: the @anthropic-ai/sdk tags custom tools with `type:"custom"`,
+// but strict third-party Anthropic-compatible shims (e.g. DeepSeek's
+// api.deepseek.com/anthropic) deserialize tools[] as a closed enum on `type`
+// and 400 on `custom`. The main loop (toolToAPISchema) also omits type, so this
+// matches it. `type` is optional on BetaTool — no change vs the real API.
 const YOLO_CLASSIFIER_TOOL_SCHEMA: BetaToolUnion = {
-  type: 'custom',
   name: YOLO_CLASSIFIER_TOOL_NAME,
   description: 'Report the security classification result for the agent action',
   input_schema: {
