@@ -169,6 +169,36 @@ export function SpinnerAnimationRow({
   const displayedResponseLength = tokenCounterRef.current;
   const leaderTokens = Math.round(displayedResponseLength / 4);
 
+  // === Tokens-per-second (smoothed over a 2s sliding window) ===
+  // Measures real-time output speed from content-length deltas each frame.
+  // The window averages out bursty deltas (Ink batches chunks) and falls to
+  // 0 while no content flows (thinking, tool execution), hiding the readout.
+  const MIN_TPS_DISPLAY = 0.5;
+  const TPS_WINDOW_MS = 2000;
+  const tpsSamplesRef = useRef<Array<{ t: number; chars: number }>>([]);
+
+  let tpsRate = 0;
+  {
+    const samples = tpsSamplesRef.current;
+    const lengthNow = responseLengthRef.current;
+    if (samples.length > 0 && lengthNow < samples[samples.length - 1]!.chars) {
+      // Content length reset (compaction, new turn) — drop stale baselines.
+      samples.length = 0;
+    }
+    while (samples.length > 0 && now - samples[0]!.t > TPS_WINDOW_MS) {
+      samples.shift();
+    }
+    if (samples.length > 0) {
+      const first = samples[0]!;
+      const dtSec = (now - first.t) / 1000;
+      const dChars = lengthNow - first.chars;
+      if (dtSec >= 0.7 && dChars >= 0) {
+        tpsRate = dChars / dtSec / 4;
+      }
+    }
+    samples.push({ t: now, chars: lengthNow });
+  }
+
   const effectiveElapsedMs = hasRunningTeammates ? Math.max(elapsedTimeMs, now - turnStartRef.current) : elapsedTimeMs;
   const timerText = formatDuration(effectiveElapsedMs);
   const timerWidth = stringWidth(timerText);
@@ -214,9 +244,17 @@ export function SpinnerAnimationRow({
   const usedAfterTimer = usedAfterThinking + (showTimer ? timerWidth + sep : 0);
 
   const showTokens = wantsTimerAndTokens && totalTokens > 0 && availableSpace > usedAfterTimer + tokensWidth;
+  const usedAfterTokens = usedAfterTimer + (showTokens ? tokensWidth + sep : 0);
+
+  // TPS readout shows whenever tokens are actually streaming (no 30s/verbose
+  // gate — it's the live signal users ask for), and hides during thinking or
+  // tool execution when the smoothed rate falls to 0.
+  const tpsText = `${Math.round(tpsRate)} tok/s`;
+  const tpsWidth = stringWidth(tpsText);
+  const showTps = tpsRate >= MIN_TPS_DISPLAY && availableSpace > usedAfterTokens + tpsWidth;
 
   const thinkingOnly =
-    showThinking && thinkingStatus === 'thinking' && !spinnerSuffix && !showTimer && !showTokens && true;
+    showThinking && thinkingStatus === 'thinking' && !spinnerSuffix && !showTimer && !showTokens && !showTps && true;
 
   // === Thinking shimmer color (formerly ThinkingShimmerText's own timer) ===
   // Same sine-wave opacity, but derived from our shared `time` instead of a
@@ -250,6 +288,13 @@ export function SpinnerAnimationRow({
             {!hasRunningTeammates && <SpinnerModeGlyph mode={mode} />}
             <Text dimColor>{tokenCount} tokens</Text>
           </Box>,
+        ]
+      : []),
+    ...(showTps
+      ? [
+          <Text dimColor key="tps">
+            {tpsText}
+          </Text>,
         ]
       : []),
     ...(showThinking && thinkingText
