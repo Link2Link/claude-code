@@ -275,11 +275,20 @@ export function getSettingsFilePathForSource(
   source: SettingSource,
 ): string | undefined {
   switch (source) {
-    case 'userSettings':
-      return join(
-        getSettingsRootPathForSource(source),
-        getUserSettingsFilePath(),
-      )
+    case 'userSettings': {
+      const root = getSettingsRootPathForSource(source)
+      const baseName = getUserSettingsFilePath()
+      // CCB: prefer the CCB-specific config file (~/.claude/ccb-settings.json)
+      // in normal (non-cowork) mode, falling back to settings.json when absent.
+      const ccbCandidate = join(root, 'ccb-settings.json')
+      if (
+        baseName === 'settings.json' &&
+        getFsImplementation().existsSync(ccbCandidate)
+      ) {
+        return ccbCandidate
+      }
+      return join(root, baseName)
+    }
     case 'projectSettings':
     case 'localSettings': {
       return join(
@@ -293,6 +302,32 @@ export function getSettingsFilePathForSource(
       return getFlagSettingsPath()
     }
   }
+}
+
+/**
+ * CCB: seed ~/.claude/ccb-settings.json from ~/.claude/settings.json when the
+ * CCB-specific config file doesn't exist yet but the legacy Claude Code one does.
+ *
+ * Idempotent: never overwrites an existing ccb-settings.json, never touches the
+ * legacy settings.json (it is copied, not moved). Until this runs, reads fall
+ * back to settings.json, so the migration is purely additive.
+ */
+export function migrateUserSettingsToCcb(): void {
+  if (
+    getUseCoworkPlugins() ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_COWORK_PLUGINS)
+  ) {
+    return
+  }
+  const home = getClaudeConfigHomeDir()
+  const ccb = join(home, 'ccb-settings.json')
+  if (getFsImplementation().existsSync(ccb)) return
+  const legacy = join(home, 'settings.json')
+  if (!getFsImplementation().existsSync(legacy)) return
+
+  getFsImplementation().mkdirSync(home)
+  writeFileSyncAndFlush_DEPRECATED(ccb, readFileSync(legacy))
+  resetSettingsCache()
 }
 
 export function getRelativeSettingsFilePathForSource(
@@ -422,6 +457,13 @@ export function updateSettingsForSource(
     (source as unknown) === 'flagSettings'
   ) {
     return { error: null }
+  }
+
+  // CCB: ensure ccb-settings.json exists (seeded from settings.json) before
+  // resolving the user settings path, so the first write migrates the legacy
+  // config and subsequent reads/writes use the CCB-specific file.
+  if (source === 'userSettings') {
+    migrateUserSettingsToCcb()
   }
 
   // Create the folder if needed

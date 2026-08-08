@@ -30,7 +30,9 @@ import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js';
 import { TeamStatus } from '../teams/TeamStatus.js';
 import { isInProcessEnabled } from '../../utils/swarm/backends/registry.js';
 import { useAppState, useAppStateStore } from 'src/state/AppState.js';
+import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 import { getIsRemoteMode } from '../../bootstrap/state.js';
+import { type EffortLevel, getDisplayedEffortLevel, modelSupportsEffort } from '../../utils/effort.js';
 import HistorySearchInput from './HistorySearchInput.js';
 import { usePrStatus } from '../../hooks/usePrStatus.js';
 import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
@@ -274,6 +276,8 @@ function ModeIndicator({
   const showSpinnerTree = expandedView === 'teammates';
   const prStatus = usePrStatus(isLoading, isPrStatusEnabled());
   const hasTmuxSession = useAppState(s => process.env.USER_TYPE === 'ant' && s.tungstenActiveSession !== undefined);
+  const effortValue = useAppState(s => s.effortValue);
+  const model = useMainLoopModel();
 
   const nextTickAt = useSyncExternalStore(
     proactiveModule?.subscribeToProactiveChanges ?? NO_OP_SUBSCRIBE,
@@ -392,6 +396,16 @@ function ModeIndicator({
       </Text>
     ) : null;
 
+  // Reasoning effort indicator — always shown when the active model supports
+  // the effort parameter, so the user can see the current intensity at a
+  // glance. Not counted as a primary item (alongside RSS, MCP, etc.) so it
+  // does not push the mode hint / PR badge off-screen.
+  const effortPart = modelSupportsEffort(model) ? (
+    <Text color={getEffortColor(getDisplayedEffortLevel(model, effortValue))} key="effort">
+      {figures.triangleUp} {getDisplayedEffortLevel(model, effortValue)} effort
+    </Text>
+  ) : null;
+
   // Build parts array - exclude BackgroundTaskStatus when we have teammate pills
   // (teammate pills get their own row)
   const parts = [
@@ -509,7 +523,7 @@ function ModeIndicator({
       />
     ) : null;
 
-  if (parts.length === 0 && !tasksPart && !modePart && showHint) {
+  if (parts.length === 0 && !tasksPart && !modePart && !effortPart && showHint) {
     parts.push(
       <Text dimColor key="shortcuts-hint">
         ? for shortcuts
@@ -590,7 +604,7 @@ function ModeIndicator({
   // part (e.g. the selection copy/native-select hints) grow the column
   // from 0→1 row. Always render 1 row in fullscreen; return a space when
   // empty so Yoga reserves the row without painting anything visible.
-  if (parts.length === 0 && !tasksPart && !modePart) {
+  if (parts.length === 0 && !tasksPart && !modePart && !effortPart) {
     return isFullscreenEnvEnabled() ? <Text> </Text> : null;
   }
 
@@ -601,6 +615,12 @@ function ModeIndicator({
       {modePart && (
         <Box flexShrink={0}>
           {modePart}
+          {(effortPart || tasksPart || parts.length > 0) && <Text dimColor> · </Text>}
+        </Box>
+      )}
+      {effortPart && (
+        <Box flexShrink={0}>
+          {effortPart}
           {(tasksPart || parts.length > 0) && <Text dimColor> · </Text>}
         </Box>
       )}
@@ -679,4 +699,19 @@ function getSpinnerHintParts(
 
 function isPrStatusEnabled(): boolean {
   return getGlobalConfig().prStatusFooterEnabled ?? true;
+}
+
+function getEffortColor(level: EffortLevel): 'subtle' | 'autoAccept' | 'claude' | 'warning' | 'error' {
+  switch (level) {
+    case 'low':
+      return 'subtle';
+    case 'medium':
+      return 'autoAccept';
+    case 'high':
+      return 'claude';
+    case 'xhigh':
+      return 'warning';
+    case 'max':
+      return 'error';
+  }
 }

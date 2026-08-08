@@ -18,6 +18,11 @@ import type {
 import { getGrokClient } from './client.js'
 import { updateOpenAIUsage } from '../openai/openaiShared.js'
 import {
+  getCustomModelConfig,
+  resolveCustomModelApiKey,
+} from '../../../utils/model/customModels.js'
+import { normalizeModelStringForAPI } from '../../../utils/model/model.js'
+import {
   anthropicMessagesToOpenAI,
   anthropicToolsToOpenAI,
   anthropicToolChoiceToOpenAI,
@@ -59,7 +64,10 @@ export async function* queryModelGrok(
   void
 > {
   try {
-    const grokModel = resolveGrokModel(options.model)
+    const customConfig = getCustomModelConfig(options.model)
+    const grokModel = customConfig
+      ? normalizeModelStringForAPI(options.model)
+      : resolveGrokModel(options.model)
     const messagesForAPI = normalizeMessagesForAPI(messages, tools)
 
     const toolSchemas = await Promise.all(
@@ -93,6 +101,10 @@ export async function* queryModelGrok(
       maxRetries: 0,
       fetchOverride: options.fetchOverride as typeof fetch | undefined,
       source: options.querySource,
+      ...(customConfig?.baseUrl && { baseURL: customConfig.baseUrl }),
+      ...(customConfig && {
+        apiKey: resolveCustomModelApiKey(customConfig) ?? '',
+      }),
     })
 
     logForDebugging(

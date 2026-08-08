@@ -16,11 +16,19 @@ export function getGrokClient(options?: {
   maxRetries?: number
   fetchOverride?: typeof fetch
   source?: string
+  baseURL?: string
+  apiKey?: string
 }): OpenAI {
-  if (cachedClient) return cachedClient
+  // A per-model baseURL/apiKey override must not reuse the cached client, which
+  // is bound to the global GROK_BASE_URL / GROK_API_KEY.
+  const overridden = !!(options?.baseURL || options?.apiKey)
+  if (cachedClient && !overridden) return cachedClient
 
-  const apiKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || ''
-  const baseURL = process.env.GROK_BASE_URL || DEFAULT_BASE_URL
+  const apiKey =
+    options?.apiKey ??
+    (process.env.GROK_API_KEY || process.env.XAI_API_KEY || '')
+  const baseURL =
+    options?.baseURL ?? (process.env.GROK_BASE_URL || DEFAULT_BASE_URL)
 
   const client = new OpenAI({
     apiKey,
@@ -32,7 +40,7 @@ export function getGrokClient(options?: {
     ...(options?.fetchOverride && { fetch: options.fetchOverride }),
   })
 
-  if (!options?.fetchOverride) {
+  if (!options?.fetchOverride && !overridden) {
     cachedClient = client
   }
 

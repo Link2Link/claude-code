@@ -22,8 +22,8 @@ type ResponsesRequest = {
   tool_choice?: unknown
   reasoning?: { effort: ResponsesReasoningEffort }
   parallel_tool_calls?: boolean
-  /** Sticky cache routing key — stable for the CCB session. */
-  prompt_cache_key: string
+  /** Sticky cache routing key — stable for the CCB session. Optional for custom endpoints. */
+  prompt_cache_key?: string
 }
 
 function textFromContent(content: unknown): string {
@@ -169,8 +169,8 @@ export function buildResponsesRequest(params: {
   tools: unknown[]
   toolChoice: unknown
   reasoningEffort?: ResponsesReasoningEffort
-  /** Session-scoped key supplied only by the ChatGPT OAuth route. */
-  promptCacheKey: string
+  /** Session-scoped key supplied only by the ChatGPT OAuth / official route. */
+  promptCacheKey?: string
 }): ResponsesRequest {
   const { input, instructions } = convertMessagesToResponsesInput(
     params.messages,
@@ -191,8 +191,11 @@ export function buildResponsesRequest(params: {
       : {}),
     parallel_tool_calls: true,
     // Same OAuth session → same key so OpenAI can sticky-route to a cache node.
-    // Must not hash the full message list (would change every turn).
-    prompt_cache_key: params.promptCacheKey,
+    // Must not hash the full message list (would change every turn). Custom
+    // endpoints (protocol: "responses") don't share OpenAI's cache contract.
+    ...(params.promptCacheKey
+      ? { prompt_cache_key: params.promptCacheKey }
+      : {}),
   }
 }
 
@@ -500,6 +503,41 @@ export async function createChatGPTResponsesStream(params: {
     const text = await response.text().catch(() => '')
     throw new Error(
       `ChatGPT Responses API request failed (${response.status})${text ? `: ${text.slice(0, 500)}` : ''}`,
+    )
+  }
+  return parseSSE(response)
+}
+
+/**
+ * Stream from a custom Responses-protocol endpoint (customModels with
+ * `protocol: "responses"`). POSTs to `{baseUrl}/responses` with the model's own
+ * apiKey as a Bearer token, using the same SSE shape as the ChatGPT backend.
+ */
+export async function createResponsesStream(params: {
+  request: ResponsesRequest
+  baseUrl: string
+  apiKey: string
+  signal: AbortSignal
+  fetchOverride?: typeof fetch
+}): Promise<AsyncIterable<Record<string, unknown>>> {
+  const fetchFn = params.fetchOverride ?? (globalThis.fetch as typeof fetch)
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${params.apiKey}`,
+    'Content-Type': 'application/json',
+    Accept: 'text/event-stream',
+    'OpenAI-Beta': 'responses=experimental',
+  }
+  const baseUrl = params.baseUrl.replace(/\/+$/, '')
+  const response = await fetchFn(`${baseUrl}/responses`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(params.request),
+    signal: params.signal,
+  })
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(
+      `Responses API request failed (${response.status})${text ? `: ${text.slice(0, 500)}` : ''}`,
     )
   }
   return parseSSE(response)

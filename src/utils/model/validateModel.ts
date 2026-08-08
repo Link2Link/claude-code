@@ -1,5 +1,6 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { MODEL_ALIASES } from './aliases.js'
+import { isCustomModel } from './customModels.js'
 import { isModelAllowed } from './modelAllowlist.js'
 import { getAPIProvider } from './providers.js'
 import { sideQuery } from '../sideQuery.js'
@@ -25,6 +26,12 @@ export async function validateModel(
   // Empty model is invalid
   if (!normalizedModel) {
     return { valid: false, error: 'Model name cannot be empty' }
+  }
+
+  // CCB: user-configured custom models are pre-validated by the user — skip
+  // the allowlist check and the live probe for them.
+  if (isCustomModel(normalizedModel)) {
+    return { valid: true }
   }
 
   // Check against availableModels allowlist before any API call

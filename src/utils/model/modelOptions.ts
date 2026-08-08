@@ -15,6 +15,7 @@ import {
 } from '../modelCost.js'
 import { getSettings_DEPRECATED } from '../settings/settings.js'
 import { checkOpus1mAccess, checkSonnet1mAccess } from './check1mAccess.js'
+import { getCustomModelConfigs, isCustomModel } from './customModels.js'
 import { getAPIProvider } from './providers.js'
 import { isModelAllowed } from './modelAllowlist.js'
 import {
@@ -552,6 +553,26 @@ function getKnownModelOption(model: string): ModelOption | null {
   }
 }
 
+/**
+ * Append user-configured custom third-party models (settings `customModels`) to
+ * the picker options, deduped by value. Extracted for unit testing.
+ */
+export function appendCustomModelOptions(
+  options: ModelOption[],
+): ModelOption[] {
+  for (const config of getCustomModelConfigs()) {
+    if (!options.some(existing => existing.value === config.model)) {
+      options.push({
+        value: config.model,
+        label: config.label ?? config.model,
+        description: config.description ?? 'Custom model',
+        descriptionForModel: config.description ?? 'Custom model',
+      })
+    }
+  }
+  return options
+}
+
 export function getModelOptions(fastMode = false): ModelOption[] {
   const options = getModelOptionsBase(fastMode)
 
@@ -576,6 +597,8 @@ export function getModelOptions(fastMode = false): ModelOption[] {
       options.push(opt)
     }
   }
+
+  appendCustomModelOptions(options)
 
   // Add custom model from either the current model value or the initial one
   // if it is not already in the options.
@@ -620,15 +643,21 @@ export function getModelOptions(fastMode = false): ModelOption[] {
 
 /**
  * Filter model options by the availableModels allowlist.
- * Always preserves the "Default" option (value: null).
+ * Always preserves the "Default" option (value: null) and user-configured
+ * custom models. Exported for unit testing.
  */
-function filterModelOptionsByAllowlist(options: ModelOption[]): ModelOption[] {
+export function filterModelOptionsByAllowlist(
+  options: ModelOption[],
+): ModelOption[] {
   const settings = getSettings_DEPRECATED() || {}
   if (!settings.availableModels) {
     return options // No restrictions
   }
   return options.filter(
     opt =>
-      opt.value === null || (opt.value !== null && isModelAllowed(opt.value)),
+      opt.value === null ||
+      // User-configured custom models are always selectable
+      isCustomModel(opt.value) ||
+      (opt.value !== null && isModelAllowed(opt.value)),
   )
 }

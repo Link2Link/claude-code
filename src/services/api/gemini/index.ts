@@ -21,6 +21,11 @@ import type { SDKAssistantMessageError } from '../../../entrypoints/agentSdkType
 import type { SystemPrompt } from '../../../utils/systemPromptType.js'
 import type { ThinkingConfig } from '../../../utils/thinking.js'
 import type { Options } from '../claude.js'
+import {
+  getCustomModelConfig,
+  resolveCustomModelApiKey,
+} from '../../../utils/model/customModels.js'
+import { normalizeModelStringForAPI } from '../../../utils/model/model.js'
 import { recordLLMObservation } from '../../../services/langfuse/tracing.js'
 import {
   convertMessagesToLangfuse,
@@ -49,7 +54,10 @@ export async function* queryModelGemini(
   void
 > {
   try {
-    const geminiModel = resolveGeminiModel(options.model)
+    const customConfig = getCustomModelConfig(options.model)
+    const geminiModel = customConfig
+      ? normalizeModelStringForAPI(options.model)
+      : resolveGeminiModel(options.model)
     const messagesForAPI = normalizeMessagesForAPI(messages, tools)
 
     const toolSchemas = await Promise.all(
@@ -85,6 +93,8 @@ export async function* queryModelGemini(
       model: geminiModel,
       signal,
       fetchOverride: options.fetchOverride as typeof fetch | undefined,
+      baseUrl: customConfig?.baseUrl,
+      apiKey: customConfig ? resolveCustomModelApiKey(customConfig) : undefined,
       body: {
         contents,
         ...(systemInstruction && { systemInstruction }),

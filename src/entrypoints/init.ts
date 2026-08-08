@@ -31,6 +31,7 @@ import { detectCurrentRepository } from '../utils/detectRepository.js'
 import { logForDiagnosticsNoPII } from '../utils/diagLogs.js'
 import { initJetBrainsDetection } from '../utils/envDynamic.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
+import { migrateUserSettingsToCcb } from '../utils/settings/settings.js'
 import { ConfigParseError, errorMessage } from '../utils/errors.js'
 // showInvalidConfigDialog is dynamically imported in the error path to avoid loading React at init
 import {
@@ -81,6 +82,11 @@ export const init = memoize(async (): Promise<void> => {
       duration_ms: Date.now() - configsStart,
     })
     profileCheckpoint('init_configs_enabled')
+
+    // CCB: seed ~/.claude/ccb-settings.json from ~/.claude/settings.json on
+    // first run so the CCB-specific config file becomes the active user config
+    // (idempotent; falls back to settings.json until the file exists).
+    migrateUserSettingsToCcb()
 
     // Apply only safe environment variables before trust dialog
     // Full environment variables are applied after trust is established

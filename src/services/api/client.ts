@@ -83,12 +83,16 @@ function createStderrLogger(): ClientOptions['logger'] {
 
 export async function getAnthropicClient({
   apiKey,
+  authToken,
+  baseURL,
   maxRetries,
   model,
   fetchOverride,
   source,
 }: {
   apiKey?: string
+  authToken?: string
+  baseURL?: string
   maxRetries: number
   model?: string
   fetchOverride?: ClientOptions['fetch']
@@ -132,7 +136,15 @@ export async function getAnthropicClient({
   await checkAndRefreshOAuthTokenIfNeeded()
   logForDebugging('[API:auth] OAuth token check complete')
 
-  if (!isClaudeAISubscriber()) {
+  // A custom model may supply its own Bearer token (e.g. a second Anthropic
+  // proxy with a different key). Set it directly so it survives the SDK, and
+  // skip the global ANTHROPIC_AUTH_TOKEN / api-key helper entirely.
+  if (authToken) {
+    defaultHeaders.Authorization = `Bearer ${authToken}`
+  }
+  if (!isClaudeAISubscriber() && !apiKey && !authToken) {
+    // Skip when a custom model supplies its own API key or Bearer token so the
+    // global ANTHROPIC_AUTH_TOKEN / helper key doesn't clobber it.
     await configureApiKeyHeaders(defaultHeaders, getIsNonInteractiveSession())
   }
 
@@ -150,7 +162,7 @@ export async function getAnthropicClient({
       fetch: resolvedFetch,
     }),
   }
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)) {
+  if (!baseURL && isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)) {
     const { BedrockClient } = await import('./bedrockClient.js')
     // Use region override for small fast model if specified
     const awsRegion =
@@ -188,7 +200,7 @@ export async function getAnthropicClient({
     // we have always been lying about the return type - this doesn't support batching or models
     return new BedrockClient(bedrockArgs) as unknown as Anthropic
   }
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)) {
+  if (!baseURL && isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)) {
     const { AnthropicFoundry } = await import('@anthropic-ai/foundry-sdk')
     // Determine Azure AD token provider based on configuration
     // SDK reads ANTHROPIC_FOUNDRY_API_KEY by default
@@ -218,7 +230,7 @@ export async function getAnthropicClient({
     // we have always been lying about the return type - this doesn't support batching or models
     return new AnthropicFoundry(foundryArgs) as unknown as Anthropic
   }
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)) {
+  if (!baseURL && isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)) {
     // Refresh GCP credentials if gcpAuthRefresh is configured and credentials are expired
     // This is similar to how we handle AWS credential refresh for Bedrock
     if (!isEnvTruthy(process.env.CLAUDE_CODE_SKIP_VERTEX_AUTH)) {
@@ -298,16 +310,36 @@ export async function getAnthropicClient({
   }
 
   // Determine authentication method based on available tokens
+  const hasCustomApiKey = !!apiKey
+  const hasCustomAuthToken = !!authToken
   const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {
-    apiKey: isClaudeAISubscriber() ? null : apiKey || getAnthropicApiKey(),
-    authToken: isClaudeAISubscriber()
-      ? getClaudeAIOAuthTokens()?.accessToken
-      : undefined,
-    // Set baseURL from OAuth config when using staging OAuth
-    ...(process.env.USER_TYPE === 'ant' &&
-    isEnvTruthy(process.env.USE_STAGING_OAUTH)
-      ? { baseURL: getOauthConfig().BASE_API_URL }
-      : {}),
+    // A custom Bearer token is carried via defaultHeaders.Authorization, so
+    // force apiKey to null here to avoid sending a spurious x-api-key header.
+    apiKey: hasCustomApiKey
+      ? apiKey
+      : hasCustomAuthToken
+        ? null
+        : isClaudeAISubscriber()
+          ? null
+          : getAnthropicApiKey(),
+    // Critical: when a custom model supplies its own key/token, pass authToken
+    // as explicit `null` so the SDK does NOT fall back to the environment's
+    // ANTHROPIC_AUTH_TOKEN and append a spurious `Authorization: Bearer`
+    // header (which would override the custom x-api-key at the endpoint).
+    authToken:
+      hasCustomApiKey || hasCustomAuthToken
+        ? null
+        : isClaudeAISubscriber()
+          ? getClaudeAIOAuthTokens()?.accessToken
+          : undefined,
+    // A custom model's own baseURL wins; otherwise fall back to the staging
+    // OAuth base or the SDK default (ANTHROPIC_BASE_URL).
+    ...(baseURL
+      ? { baseURL }
+      : process.env.USER_TYPE === 'ant' &&
+          isEnvTruthy(process.env.USE_STAGING_OAUTH)
+        ? { baseURL: getOauthConfig().BASE_API_URL }
+        : {}),
     ...ARGS,
     ...(isDebugToStdErr() && { logger: createStderrLogger() }),
   }

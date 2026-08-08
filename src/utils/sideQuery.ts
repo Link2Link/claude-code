@@ -31,6 +31,12 @@ import { getModelBetas, modelSupportsStructuredOutputs } from './betas.js'
 import { logForDebugging } from './debug.js'
 import { errorMessage } from './errors.js'
 import { getAPIProvider } from './model/providers.js'
+import {
+  getCustomModelConfig,
+  getCustomModelProtocol,
+  resolveCustomModelApiKey,
+  resolveCustomModelAuthToken,
+} from './model/customModels.js'
 import { normalizeModelStringForAPI } from './model/model.js'
 import { getOpenAIClient } from '../services/api/openai/client.js'
 import { getGrokClient } from '../services/api/grok/client.js'
@@ -39,6 +45,7 @@ import {
   adaptResponsesStreamToAnthropic,
   buildResponsesRequest,
   createChatGPTResponsesStream,
+  createResponsesStream,
 } from '../services/api/openai/responsesAdapter.js'
 import {
   formatOpenAIPromptCacheKey,
@@ -192,7 +199,11 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
     stop_sequences,
   } = opts
 
-  const provider = getAPIProvider()
+  // CCB: a user-configured custom model can route to its own protocol/endpoint.
+  const customConfig = getCustomModelConfig(model)
+  const provider = customConfig
+    ? getCustomModelProtocol(customConfig)
+    : getAPIProvider()
   if (provider === 'openai' || provider === 'grok') {
     return sideQueryViaOpenAICompatible(opts)
   }
@@ -204,6 +215,11 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
     maxRetries,
     model,
     source: 'side_query',
+    baseURL: customConfig?.baseUrl,
+    apiKey: customConfig ? resolveCustomModelApiKey(customConfig) : undefined,
+    authToken: customConfig
+      ? resolveCustomModelAuthToken(customConfig)
+      : undefined,
   })
   const betas = [...getModelBetas(model)]
   // Add structured-outputs beta if using output_format and provider supports it
@@ -615,6 +631,38 @@ async function sideQueryViaChatGPTResponses(
 }
 
 /**
+ * Side query for a custom model whose endpoint only speaks the OpenAI
+ * Responses API (customModels `protocol: "responses"`). Uses the model's own
+ * baseUrl + apiKey (Bearer) and the Responses SSE shape.
+ */
+async function sideQueryViaCustomResponses(
+  opts: SideQueryOptions,
+  openaiModel: string,
+  openaiMessages: Array<{
+    role: 'system' | 'user' | 'assistant'
+    content: string
+  }>,
+  openaiTools: unknown[] | undefined,
+  openaiToolChoice: unknown,
+): Promise<BetaMessage> {
+  const config = getCustomModelConfig(opts.model)
+  const request = buildResponsesRequest({
+    model: openaiModel,
+    messages: openaiMessages,
+    tools: openaiTools ?? [],
+    toolChoice: openaiToolChoice,
+  })
+  const rawStream = await createResponsesStream({
+    request,
+    baseUrl: config?.baseUrl ?? '',
+    apiKey: config ? (resolveCustomModelApiKey(config) ?? '') : '',
+    signal: opts.signal ?? new AbortController().signal,
+  })
+  const adapted = adaptResponsesStreamToAnthropic(rawStream, openaiModel)
+  return collectAnthropicStreamToBetaMessage(adapted, openaiModel)
+}
+
+/**
  * OpenAI-compatible side query for OpenAI and Grok providers.
  * Both use the OpenAI SDK with different base URLs.
  *
@@ -643,12 +691,17 @@ async function sideQueryViaOpenAICompatible(
     signal,
   } = opts
 
-  const provider = getAPIProvider()
+  const customConfig = getCustomModelConfig(model)
+  const provider = customConfig
+    ? getCustomModelProtocol(customConfig)
+    : getAPIProvider()
   const normalizedModel = normalizeModelStringForAPI(model)
 
-  // Resolve model name per provider
-  const openaiModel =
-    provider === 'grok'
+  // Resolve model name per provider. Custom models bypass the provider's
+  // model mapping so the configured model string reaches the endpoint verbatim.
+  const openaiModel = customConfig
+    ? normalizedModel
+    : provider === 'grok'
       ? resolveGrokModel(normalizedModel)
       : resolveOpenAIModel(normalizedModel)
 
@@ -675,8 +728,19 @@ async function sideQueryViaOpenAICompatible(
     : undefined
 
   // ChatGPT subscription auth: use Responses API + OAuth, never empty API key.
-  if (provider === 'openai' && isChatGPTAuthEnabled()) {
+  if (provider === 'openai' && !customConfig && isChatGPTAuthEnabled()) {
     return sideQueryViaChatGPTResponses(
+      opts,
+      openaiModel,
+      openaiMessages,
+      openaiTools,
+      openaiToolChoice,
+    )
+  }
+
+  // Custom model that only speaks the Responses API (protocol: "responses").
+  if (customConfig?.protocol === 'responses') {
+    return sideQueryViaCustomResponses(
       opts,
       openaiModel,
       openaiMessages,
@@ -689,8 +753,20 @@ async function sideQueryViaOpenAICompatible(
   // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
   const client: import('openai').default =
     provider === 'grok'
-      ? getGrokClient({ maxRetries: opts.maxRetries ?? 2 })
-      : getOpenAIClient({ maxRetries: opts.maxRetries ?? 2 })
+      ? getGrokClient({
+          maxRetries: opts.maxRetries ?? 2,
+          ...(customConfig?.baseUrl && { baseURL: customConfig.baseUrl }),
+          ...(customConfig && {
+            apiKey: resolveCustomModelApiKey(customConfig) ?? '',
+          }),
+        })
+      : getOpenAIClient({
+          maxRetries: opts.maxRetries ?? 2,
+          ...(customConfig?.baseUrl && { baseURL: customConfig.baseUrl }),
+          ...(customConfig && {
+            apiKey: resolveCustomModelApiKey(customConfig) ?? '',
+          }),
+        })
 
   const start = Date.now()
 
@@ -699,8 +775,9 @@ async function sideQueryViaOpenAICompatible(
     messages: openaiMessages,
     max_tokens,
   }
-  const promptCacheKey =
-    provider === 'openai'
+  const promptCacheKey = customConfig
+    ? undefined // Custom endpoints don't share OpenAI's official cache contract.
+    : provider === 'openai'
       ? getOfficialOpenAIPromptCacheKey(
           process.env.OPENAI_BASE_URL,
           getSessionId(),
@@ -825,8 +902,11 @@ async function sideQueryViaGemini(
     signal,
   } = opts
 
+  const customConfig = getCustomModelConfig(model)
   const normalizedModel = normalizeModelStringForAPI(model)
-  const geminiModel = resolveGeminiModel(normalizedModel)
+  const geminiModel = customConfig
+    ? normalizedModel
+    : resolveGeminiModel(normalizedModel)
 
   // Build Gemini contents from Anthropic MessageParam[]
   const contents: Array<{
@@ -870,6 +950,7 @@ async function sideQueryViaGemini(
     : undefined
 
   const baseUrl = (
+    customConfig?.baseUrl ||
     process.env.GEMINI_BASE_URL ||
     'https://generativelanguage.googleapis.com/v1beta'
   ).replace(/\/+$/, '')
@@ -907,7 +988,9 @@ async function sideQueryViaGemini(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-goog-api-key': process.env.GEMINI_API_KEY || '',
+      'x-goog-api-key':
+        (customConfig ? resolveCustomModelApiKey(customConfig) : undefined) ??
+        (process.env.GEMINI_API_KEY || ''),
     },
     body: JSON.stringify(body),
     signal,

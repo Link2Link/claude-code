@@ -40,11 +40,16 @@ export function getOpenAIClient(options?: {
   maxRetries?: number
   fetchOverride?: typeof fetch
   source?: string
+  baseURL?: string
+  apiKey?: string
 }): OpenAI {
-  if (cachedClient) return cachedClient
+  // A per-model baseURL/apiKey override must not reuse the cached client, which
+  // is bound to the global OPENAI_BASE_URL / OPENAI_API_KEY.
+  const overridden = !!(options?.baseURL || options?.apiKey)
+  if (cachedClient && !overridden) return cachedClient
 
-  const apiKey = process.env.OPENAI_API_KEY || ''
-  const baseURL = process.env.OPENAI_BASE_URL
+  const apiKey = options?.apiKey ?? (process.env.OPENAI_API_KEY || '')
+  const baseURL = options?.baseURL ?? process.env.OPENAI_BASE_URL
 
   const baseFetch = options?.fetchOverride ?? (globalThis.fetch as typeof fetch)
   const wrappedFetch = wrapFetchForUsage(baseFetch)
@@ -65,7 +70,7 @@ export function getOpenAIClient(options?: {
     fetch: wrappedFetch,
   })
 
-  if (!options?.fetchOverride) {
+  if (!options?.fetchOverride && !overridden) {
     cachedClient = client
   }
 

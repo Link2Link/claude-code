@@ -203,6 +203,12 @@ import { validateBoundedIntEnvVar } from '../../utils/envValidation.js'
 import { safeParseJSON } from '../../utils/json.js'
 import { getInferenceProfileBackingModel } from '../../utils/model/bedrock.js'
 import {
+  getCustomModelConfig,
+  getCustomModelProtocol,
+  resolveCustomModelApiKey,
+  resolveCustomModelAuthToken,
+} from '../../utils/model/customModels.js'
+import {
   normalizeModelStringForAPI,
   parseUserSpecifiedModel,
 } from '../../utils/model/model.js'
@@ -862,6 +868,7 @@ export async function* executeNonStreamingRequest(
   originatingRequestId?: string | null,
 ): AsyncGenerator<SystemAPIErrorMessage, BetaMessage> {
   const fallbackTimeoutMs = getNonstreamingFallbackTimeoutMs()
+  const nonStreamingCustomConfig = getCustomModelConfig(clientOptions.model)
   const generator = withRetry(
     () =>
       getAnthropicClient({
@@ -869,6 +876,13 @@ export async function* executeNonStreamingRequest(
         model: clientOptions.model,
         fetchOverride: clientOptions.fetchOverride,
         source: clientOptions.source,
+        baseURL: nonStreamingCustomConfig?.baseUrl,
+        apiKey: nonStreamingCustomConfig
+          ? resolveCustomModelApiKey(nonStreamingCustomConfig)
+          : undefined,
+        authToken: nonStreamingCustomConfig
+          ? resolveCustomModelAuthToken(nonStreamingCustomConfig)
+          : undefined,
       }),
     async (anthropic, attempt, context) => {
       const start = Date.now()
@@ -1056,6 +1070,13 @@ async function* queryModel(
   StreamEvent | AssistantMessage | SystemAPIErrorMessage,
   void
 > {
+  // CCB: per-model routing — a user-configured custom model can target its own
+  // provider protocol (and baseURL/API key), overriding the global provider.
+  const customConfig = getCustomModelConfig(options.model)
+  const effectiveProvider = customConfig
+    ? getCustomModelProtocol(customConfig)
+    : getAPIProvider()
+
   // Check cheap conditions first — the off-switch await blocks on GrowthBook
   // init (~10ms). For non-Opus models (haiku, sonnet) this skips the await
   // entirely. Subscribers don't hit this path at all.
@@ -1086,6 +1107,7 @@ async function* queryModel(
   const previousRequestId = getPreviousRequestIdFromMessages(messages)
 
   const resolvedModel =
+    !customConfig &&
     getAPIProvider() === 'bedrock' &&
     options.model.includes('application-inference-profile')
       ? ((await getInferenceProfileBackingModel(options.model)) ??
@@ -1340,7 +1362,9 @@ async function* queryModel(
   // OpenAI-compatible provider: delegate to the OpenAI adapter layer
   // after shared preprocessing (message normalization, tool filtering,
   // media stripping) but before Anthropic-specific logic (betas, thinking, caching).
-  if (getAPIProvider() === 'openai') {
+  // Custom models with protocol "responses" reuse the same adapter, which
+  // routes them through the OpenAI Responses API instead of Chat Completions.
+  if (effectiveProvider === 'openai' || effectiveProvider === 'responses') {
     const { queryModelOpenAI } = await import('./openai/index.js')
     // OpenAI emulates Anthropic's dynamic tool loading client-side. It needs
     // the full tool pool so SearchExtraToolsTool can search deferred MCP tools that
@@ -1355,7 +1379,7 @@ async function* queryModel(
     return
   }
 
-  if (getAPIProvider() === 'gemini') {
+  if (effectiveProvider === 'gemini') {
     const { queryModelGemini } = await import('./gemini/index.js')
     yield* queryModelGemini(
       messagesForAPI,
@@ -1368,7 +1392,7 @@ async function* queryModel(
     return
   }
 
-  if (getAPIProvider() === 'grok') {
+  if (effectiveProvider === 'grok') {
     const { queryModelGrok } = await import('./grok/index.js')
     yield* queryModelGrok(
       messagesForAPI,
@@ -1878,6 +1902,13 @@ async function* queryModel(
           model: options.model,
           fetchOverride: options.fetchOverride,
           source: options.querySource,
+          baseURL: customConfig?.baseUrl,
+          apiKey: customConfig
+            ? resolveCustomModelApiKey(customConfig)
+            : undefined,
+          authToken: customConfig
+            ? resolveCustomModelAuthToken(customConfig)
+            : undefined,
         }),
       async (anthropic, attempt, context) => {
         attemptNumber = attempt

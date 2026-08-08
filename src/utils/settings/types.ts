@@ -396,6 +396,79 @@ export const SettingsSchema = lazySchema(() =>
             'model ID (e.g. a Bedrock inference profile ARN). Typically set in managed settings by ' +
             'enterprise administrators.',
         ),
+      // CCB: user-defined third-party models added to the /model picker
+      customModels: z
+        .array(
+          z.object({
+            model: z
+              .string()
+              .describe(
+                'Model ID sent to the API and the value shown in the /model picker. Use provider-specific IDs (e.g. "deepseek-chat"), not aliases.',
+              ),
+            label: z
+              .string()
+              .optional()
+              .describe(
+                'Display name in the /model picker. Defaults to `model`.',
+              ),
+            description: z
+              .string()
+              .optional()
+              .describe(
+                'Subtitle in the /model picker. Defaults to "Custom model".',
+              ),
+            baseUrl: z
+              .string()
+              .optional()
+              .describe(
+                "This model's own endpoint base URL. Defaults to the active provider's env-derived base URL.",
+              ),
+            apiKey: z
+              .string()
+              .optional()
+              .describe(
+                'Literal API key for this model, sent as `x-api-key` (Anthropic SDK) or `Authorization: Bearer` ' +
+                  '(OpenAI/Gemini/Grok SDKs). Takes precedence over apiKeyEnv. Prefer an env var reference when possible.',
+              ),
+            authToken: z
+              .string()
+              .optional()
+              .describe(
+                'Literal Bearer token for this model, sent as `Authorization: Bearer <token>`. Takes precedence over ' +
+                  'authTokenEnv. For endpoints that authenticate with a Bearer token rather than an x-api-key.',
+              ),
+            apiKeyEnv: z
+              .string()
+              .optional()
+              .describe(
+                'Name of the environment variable holding this model\'s API key (e.g. "DEEPSEEK_API_KEY"). ' +
+                  'The value is read at request time; never store the key itself in the settings file.',
+              ),
+            authTokenEnv: z
+              .string()
+              .optional()
+              .describe(
+                "Name of the environment variable holding this model's Bearer token for Anthropic-protocol endpoints " +
+                  '(e.g. "PROXY_B_TOKEN"). Sent as `Authorization: Bearer <token>`. Use instead of apiKeyEnv when the ' +
+                  'endpoint authenticates with a Bearer token rather than an x-api-key.',
+              ),
+            protocol: z
+              .enum(['anthropic', 'openai', 'gemini', 'grok', 'responses'])
+              .optional()
+              .describe(
+                'Wire format this endpoint speaks. Defaults to the active provider: "openai" when modelType/openai env is active, ' +
+                  '"anthropic" for first-party Anthropic, etc. Set "openai" for OpenAI-compatible endpoints ' +
+                  '(OpenRouter, DeepSeek, GLM, Qwen, vLLM) reached while the global provider is Anthropic. ' +
+                  'Set "responses" for endpoints that only speak the OpenAI Responses API (no Chat Completions); ' +
+                  'requests are sent to `{baseUrl}/responses` with the apiKey as a Bearer token.',
+              ),
+          }),
+        )
+        .optional()
+        .describe(
+          'Arbitrary third-party models added to the /model picker. Each entry can route to its own baseUrl and API key, ' +
+            'so selecting it dispatches that model string to that endpoint with that key. Typically set by the user.',
+        ),
       // Whether to automatically approve all MCP servers in the project
       enableAllProjectMcpServers: z
         .boolean()
@@ -758,11 +831,7 @@ export const SettingsSchema = lazySchema(() =>
             'enabled automatically for supported models.',
         ),
       effortLevel: z
-        .enum(
-          process.env.USER_TYPE === 'ant'
-            ? ['low', 'medium', 'high', 'xhigh', 'max']
-            : ['low', 'medium', 'high', 'xhigh'],
-        )
+        .enum(['low', 'medium', 'high', 'xhigh', 'max'])
         .optional()
         .catch(undefined)
         .describe('Persisted effort level for supported models.'),
@@ -1204,6 +1273,13 @@ export type DeniedMcpServerEntry = z.infer<
   ReturnType<typeof DeniedMcpServerEntrySchema>
 >
 export type SettingsJson = z.infer<ReturnType<typeof SettingsSchema>>
+
+/**
+ * A single user-defined third-party model entry in the `customModels` setting.
+ */
+export type CustomModelConfig = NonNullable<
+  z.infer<ReturnType<typeof SettingsSchema>>['customModels']
+>[number]
 
 /**
  * Type guard for MCP server entry with serverName
