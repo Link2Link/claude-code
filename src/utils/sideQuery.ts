@@ -41,6 +41,7 @@ import { normalizeModelStringForAPI } from './model/model.js'
 import { getOpenAIClient } from '../services/api/openai/client.js'
 import { getGrokClient } from '../services/api/grok/client.js'
 import { isChatGPTAuthEnabled } from '../services/api/openai/chatgptAuth.js'
+import { isOpenAIThinkingEnabled } from '../services/api/openai/requestBody.js'
 import {
   adaptResponsesStreamToAnthropic,
   buildResponsesRequest,
@@ -723,9 +724,24 @@ async function sideQueryViaOpenAICompatible(
     tools && tools.length > 0
       ? anthropicToolsToOpenAI(tools as BetaToolUnion[])
       : undefined
-  const openaiToolChoice = tool_choice
+  let openaiToolChoice = tool_choice
     ? anthropicToolChoiceToOpenAI(tool_choice)
     : undefined
+
+  // DeepSeek/MiMo thinking mode rejects specific-function tool_choice with a
+  // 400 ("Thinking mode does not support this tool_choice") — reasoning
+  // endpoints only accept 'auto'/'none'. When the resolved model runs in
+  // thinking mode, downgrade a forced function choice (and 'required', from
+  // Anthropic 'any') to 'auto': callers force the tool via their system
+  // prompt anyway, and 'auto' keeps the request valid on thinking-mode
+  // endpoints (e.g. yoloClassifier on deepseek-v4-flash).
+  if (
+    openaiToolChoice &&
+    isOpenAIThinkingEnabled(openaiModel) &&
+    (typeof openaiToolChoice === 'object' || openaiToolChoice === 'required')
+  ) {
+    openaiToolChoice = 'auto'
+  }
 
   // ChatGPT subscription auth: use Responses API + OAuth, never empty API key.
   if (provider === 'openai' && !customConfig && isChatGPTAuthEnabled()) {

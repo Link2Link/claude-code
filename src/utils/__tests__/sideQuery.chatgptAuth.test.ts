@@ -334,6 +334,54 @@ describe('sideQuery OpenAI ChatGPT OAuth path', () => {
     expect(result.usage.cache_creation_input_tokens).toBe(0)
   })
 
+  test('downgrades specific-function tool_choice to auto on deepseek thinking models', async () => {
+    // Regression: deepseek-v4-flash via OpenAI-compatible proxy 400'd with
+    // "Thinking mode does not support this tool_choice" because thinking-mode
+    // endpoints only accept 'auto'/'none' tool_choice.
+    delete process.env.OPENAI_AUTH_MODE
+    delete process.env.OPENAI_ENABLE_THINKING
+    process.env.OPENAI_API_KEY = 'sk-test-not-real'
+    const { sideQuery } = await import('../sideQuery.js')
+
+    const result = await sideQuery({
+      querySource: 'auto_mode',
+      model: 'deepseek-v4-flash',
+      messages: [{ role: 'user', content: 'classify this action' }],
+      tools: [classifierTool as never],
+      tool_choice: { type: 'tool', name: 'classify_result' },
+    })
+
+    expect(chatCompletionsCreateCount).toBe(1)
+    expect(lastChatCompletionsArgs?.tool_choice).toBe('auto')
+    expect(lastChatCompletionsArgs?.tools).toBeDefined()
+    // Forced tool call still surfaces to the caller via the model response
+    const toolUse = result.content.find(b => b.type === 'tool_use') as
+      | { type: 'tool_use'; name: string; input: unknown }
+      | undefined
+    expect(toolUse?.name).toBe('classify_result')
+  })
+
+  test('keeps specific-function tool_choice for non-thinking models', async () => {
+    delete process.env.OPENAI_AUTH_MODE
+    delete process.env.OPENAI_ENABLE_THINKING
+    process.env.OPENAI_API_KEY = 'sk-test-not-real'
+    const { sideQuery } = await import('../sideQuery.js')
+
+    await sideQuery({
+      querySource: 'auto_mode',
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: 'classify this action' }],
+      tools: [classifierTool as never],
+      tool_choice: { type: 'tool', name: 'classify_result' },
+    })
+
+    expect(chatCompletionsCreateCount).toBe(1)
+    expect(lastChatCompletionsArgs?.tool_choice).toEqual({
+      type: 'function',
+      function: { name: 'classify_result' },
+    })
+  })
+
   test('ChatGPT OAuth request failure propagates for fail-closed classifiers', async () => {
     process.env.OPENAI_AUTH_MODE = 'chatgpt'
     globalThis.fetch = (async () =>
