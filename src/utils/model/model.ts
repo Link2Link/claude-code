@@ -230,6 +230,23 @@ export function getDefaultHaikuModel(): ModelName {
   return getModelStrings().haiku45
 }
 
+// CCB: Fable tier — a configurable fourth tier (alongside Opus/Sonnet/Haiku)
+// for users who want an extra model class. Defaults to the Opus model when no
+// env override is set, so the picker always shows something usable.
+export function getDefaultFableModel(): ModelName {
+  const provider = getAPIProvider()
+  const openAIModel = getOpenAIModelForTier(provider, 'opus')
+  if (openAIModel) return openAIModel
+  if (provider === 'gemini' && process.env.GEMINI_DEFAULT_OPUS_MODEL) {
+    return process.env.GEMINI_DEFAULT_OPUS_MODEL
+  }
+  if (process.env.ANTHROPIC_DEFAULT_FABLE_MODEL) {
+    return process.env.ANTHROPIC_DEFAULT_FABLE_MODEL
+  }
+  // Fall back to the Opus default so the Fable tier is always functional.
+  return getDefaultOpusModel()
+}
+
 /**
  * Get the model to use for runtime, depending on the runtime context.
  * @param params Subset of the runtime context to determine the model to use.
@@ -564,6 +581,8 @@ export function parseUserSpecifiedModel(
         return getDefaultHaikuModel() + (has1mTag ? '[1m]' : '')
       case 'opus':
         return getDefaultOpusModel() + (has1mTag ? '[1m]' : '')
+      case 'fable':
+        return getDefaultFableModel() + (has1mTag ? '[1m]' : '')
       case 'best':
         return getBestModel()
       default:

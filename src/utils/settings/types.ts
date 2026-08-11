@@ -462,6 +462,24 @@ export const SettingsSchema = lazySchema(() =>
                   'Set "responses" for endpoints that only speak the OpenAI Responses API (no Chat Completions); ' +
                   'requests are sent to `{baseUrl}/responses` with the apiKey as a Bearer token.',
               ),
+            contextWindow: z
+              .number()
+              .int()
+              .positive()
+              .optional()
+              .describe(
+                'Context window size in tokens for this model, overriding the client-side default (200K) and the `[1m]` suffix. ' +
+                  'Used for UI percentage, auto-compact thresholds, and local token budgeting — not sent to the API.',
+              ),
+            maxTokens: z
+              .number()
+              .int()
+              .positive()
+              .optional()
+              .describe(
+                'Maximum output tokens for this model. When set, both `default` and `upperLimit` returned by ' +
+                  '`getModelMaxOutputTokens()` equal this value, overriding the model-family defaults.',
+              ),
           }),
         )
         .optional()

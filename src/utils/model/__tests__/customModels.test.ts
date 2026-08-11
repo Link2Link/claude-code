@@ -138,6 +138,52 @@ describe('resolveCustomModelAuthToken', () => {
   })
 })
 
+describe('getCustomModelContextWindow', () => {
+  test('returns the configured contextWindow for a custom model', () => {
+    mockSettings = {
+      customModels: [{ model: 'glm-5.2', contextWindow: 256_000 }],
+    }
+    expect(customModels.getCustomModelContextWindow('glm-5.2')).toBe(256_000)
+  })
+
+  test('matches model id with [1m] suffix stripped', () => {
+    mockSettings = {
+      customModels: [{ model: 'kimi-k3[1m]', contextWindow: 500_000 }],
+    }
+    expect(customModels.getCustomModelContextWindow('kimi-k3[1m]')).toBe(
+      500_000,
+    )
+    expect(customModels.getCustomModelContextWindow('kimi-k3')).toBe(500_000)
+  })
+
+  test('returns undefined when field is absent', () => {
+    mockSettings = { customModels: [{ model: 'glm-5.2' }] }
+    expect(customModels.getCustomModelContextWindow('glm-5.2')).toBeUndefined()
+  })
+
+  test('returns undefined for unknown model', () => {
+    expect(
+      customModels.getCustomModelContextWindow('not-configured'),
+    ).toBeUndefined()
+  })
+})
+
+describe('getCustomModelMaxOutputTokens', () => {
+  test('returns the configured maxTokens for a custom model', () => {
+    mockSettings = {
+      customModels: [{ model: 'glm-5.2', maxTokens: 32_000 }],
+    }
+    expect(customModels.getCustomModelMaxOutputTokens('glm-5.2')).toBe(32_000)
+  })
+
+  test('returns undefined when field is absent', () => {
+    mockSettings = { customModels: [{ model: 'glm-5.2' }] }
+    expect(
+      customModels.getCustomModelMaxOutputTokens('glm-5.2'),
+    ).toBeUndefined()
+  })
+})
+
 describe('getCustomModelProtocol', () => {
   test('honors an explicit protocol', () => {
     expect(customModels.getCustomModelProtocol(configs[0])).toBe('openai')

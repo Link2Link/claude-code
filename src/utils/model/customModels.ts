@@ -74,3 +74,21 @@ export function getCustomModelProtocol(
       return 'anthropic'
   }
 }
+
+/**
+ * Context window override (in tokens) for a custom model. Returns undefined
+ * when the model is not custom or no `contextWindow` field is configured.
+ */
+export function getCustomModelContextWindow(model: string): number | undefined {
+  return getCustomModelConfig(model)?.contextWindow
+}
+
+/**
+ * Max output tokens override for a custom model. Returns undefined when the
+ * model is not custom or no `maxTokens` field is configured.
+ */
+export function getCustomModelMaxOutputTokens(
+  model: string,
+): number | undefined {
+  return getCustomModelConfig(model)?.maxTokens
+}

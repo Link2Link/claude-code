@@ -1,6 +1,10 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { CONTEXT_1M_BETA_HEADER } from '../constants/betas.js'
 import { getGlobalConfig } from './config.js'
+import {
+  getCustomModelContextWindow,
+  getCustomModelMaxOutputTokens,
+} from './model/customModels.js'
 import { isEnvTruthy } from './envUtils.js'
 import { getCanonicalName } from './model/model.js'
 import { resolveAntModel } from './model/antModels.js'
@@ -73,6 +77,16 @@ export function getContextWindowForModel(
     if (!isNaN(override) && override > 0) {
       return override
     }
+  }
+
+  // Explicit customModel.contextWindow — overrides the 200K default and the
+  // [1m] suffix so users can pin an exact window for third-party models.
+  const customWindow = getCustomModelContextWindow(model)
+  if (customWindow !== undefined) {
+    if (customWindow > MODEL_CONTEXT_WINDOW_DEFAULT && is1mContextDisabled()) {
+      return MODEL_CONTEXT_WINDOW_DEFAULT
+    }
+    return customWindow
   }
 
   // [1m] suffix — explicit client-side opt-in, respected over all detection
@@ -189,6 +203,13 @@ export function getModelMaxOutputTokens(model: string): {
       upperLimit = antModel.upperMaxTokensLimit ?? MAX_OUTPUT_TOKENS_UPPER_LIMIT
       return { default: defaultTokens, upperLimit }
     }
+  }
+
+  // Explicit customModel.maxTokens — overrides model-family defaults so
+  // third-party models can declare their own output cap.
+  const customMax = getCustomModelMaxOutputTokens(model)
+  if (customMax !== undefined) {
+    return { default: customMax, upperLimit: customMax }
   }
 
   const m = getCanonicalName(model)
