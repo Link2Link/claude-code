@@ -35,6 +35,7 @@ const {
   messageTokenCountFromLastAPIResponse,
   getCurrentUsage,
   doesMostRecentAssistantMessageExceed200k,
+  messagesContainImageBlocks,
   getAssistantMessageContentLength,
 } = await import('../tokens')
 
@@ -70,6 +71,14 @@ function makeUserMessage(text: string) {
     type: 'user' as const,
     uuid: `test-${Math.random()}`,
     message: { role: 'user' as const, content: text },
+  }
+}
+
+function makeUserMessageWithContent(content: any[]) {
+  return {
+    type: 'user' as const,
+    uuid: `test-${Math.random()}`,
+    message: { role: 'user' as const, content },
   }
 }
 
@@ -242,6 +251,64 @@ describe('doesMostRecentAssistantMessageExceed200k', () => {
 
   test('returns false for empty messages', () => {
     expect(doesMostRecentAssistantMessageExceed200k([])).toBe(false)
+  })
+})
+
+// ─── messagesContainImageBlocks ────────────────────────────────────────
+
+describe('messagesContainImageBlocks', () => {
+  test('returns true when a user message has an image block', () => {
+    const msgs = [
+      makeUserMessageWithContent([
+        { type: 'text', text: 'look at this' },
+        {
+          type: 'image',
+          source: { type: 'base64', media_type: 'image/png', data: '...' },
+        },
+      ]),
+    ]
+    expect(messagesContainImageBlocks(msgs as any)).toBe(true)
+  })
+
+  test('returns false when user message has only text', () => {
+    const msgs = [makeUserMessageWithContent([{ type: 'text', text: 'hi' }])]
+    expect(messagesContainImageBlocks(msgs as any)).toBe(false)
+  })
+
+  test('returns false for plain string content', () => {
+    const msgs = [makeUserMessage('just text')]
+    expect(messagesContainImageBlocks(msgs as any)).toBe(false)
+  })
+
+  test('ignores assistant messages with image blocks (only scans user role)', () => {
+    const msgs = [
+      makeAssistantMessage([
+        {
+          type: 'image',
+          source: { type: 'base64', media_type: 'image/png', data: '...' },
+        },
+      ]),
+    ]
+    expect(messagesContainImageBlocks(msgs as any)).toBe(false)
+  })
+
+  test('returns true when image is in a later user turn', () => {
+    const msgs = [
+      makeUserMessage('first turn'),
+      makeAssistantMessage([{ type: 'text', text: 'reply' }]),
+      makeUserMessageWithContent([
+        { type: 'text', text: 'second turn with image' },
+        {
+          type: 'image',
+          source: { type: 'base64', media_type: 'image/jpeg', data: '...' },
+        },
+      ]),
+    ]
+    expect(messagesContainImageBlocks(msgs as any)).toBe(true)
+  })
+
+  test('returns false for empty messages', () => {
+    expect(messagesContainImageBlocks([])).toBe(false)
   })
 })
 

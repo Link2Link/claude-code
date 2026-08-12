@@ -94,6 +94,7 @@ import {
 } from './utils/model/model.js'
 import {
   doesMostRecentAssistantMessageExceed200k,
+  messagesContainImageBlocks,
   finalContextTokensFromLastResponse,
   tokenCountWithEstimation,
 } from './utils/tokens.js'
@@ -773,6 +774,7 @@ async function* queryLoop(
       exceeds200kTokens:
         permissionMode === 'plan' &&
         doesMostRecentAssistantMessageExceed200k(messagesForQuery),
+      hasImageBlocks: messagesContainImageBlocks(messagesForQuery),
     })
 
     queryCheckpoint('query_setup_end')

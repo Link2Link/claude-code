@@ -19,6 +19,7 @@ import {
   getDefaultOpusModel,
   getDefaultHaikuModel,
   getDefaultFableModel,
+  getDefaultVisionModel,
   getDefaultMainLoopModelSetting,
   getMarketingNameForModel,
   getUserSpecifiedModelSetting,
@@ -160,6 +161,20 @@ function getSingleFableOption(): ModelOption {
   }
 }
 
+// CCB: Vision tier — 多模态专用档位，用于含图像请求的自动路由或手动切换。
+// Defaults to ANTHROPIC_DEFAULT_VISION_MODEL / GEMINI_DEFAULT_VISION_MODEL or
+// falls back to Sonnet (Claude 4+ 默认支持视觉). Picker shows it after Fable.
+function getSingleVisionOption(): ModelOption {
+  const visionModel = getDefaultVisionModel()
+  const name = getMarketingNameForModel(visionModel) ?? visionModel
+  return {
+    value: 'vision',
+    label: name,
+    description: `Vision模型`,
+    descriptionForModel: `${name} - vision tier for multimodal (${visionModel})`,
+  }
+}
+
 function getMaxOpusOption(fastMode = false): ModelOption {
   return {
     value: 'opus',
@@ -229,7 +244,7 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     return getChatGPTCodexModelOptions()
   }
 
-  // Simplified picker: one option per tier (Opus / Fable / Sonnet / Haiku).
+  // Simplified picker: one option per tier (Opus / Fable / Vision / Sonnet / Haiku).
   // The actual model is resolved via getDefault*Model(), so env overrides
   // (ANTHROPIC_DEFAULT_OPUS_MODEL etc.) and provider-specific defaults
   // all flow through the same single option per tier.
@@ -237,6 +252,7 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     getDefaultOptionForUser(fastMode),
     getSingleOpusOption(fastMode),
     getSingleFableOption(),
+    getSingleVisionOption(),
     getSingleSonnetOption(),
     getSingleHaikuOption(),
   ]

@@ -3,10 +3,12 @@ export const MODEL_ALIASES = [
   'opus',
   'haiku',
   'fable',
+  'vision',
   'best',
   'sonnet[1m]',
   'opus[1m]',
   'fable[1m]',
+  'vision[1m]',
   'opusplan',
 ] as const
 export type ModelAlias = (typeof MODEL_ALIASES)[number]
@@ -25,6 +27,7 @@ export const MODEL_FAMILY_ALIASES = [
   'opus',
   'haiku',
   'fable',
+  'vision',
 ] as const
 
 export function isModelFamilyAlias(model: string): boolean {

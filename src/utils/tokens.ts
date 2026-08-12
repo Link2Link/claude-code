@@ -188,6 +188,28 @@ export function doesMostRecentAssistantMessageExceed200k(
 }
 
 /**
+ * Detect whether any user message in the transcript carries an image content
+ * block. Used by getRuntimeMainLoopModel() to auto-route image-bearing turns
+ * to the Vision tier when the user hasn't explicitly pinned a model.
+ *
+ * Pattern mirrors hasImageBlock() in utils/toolResultStorage.ts but scans
+ * the whole message array's user content. Tool-result image blocks are also
+ * detected via the same shape (BetaImageBlockParam has type === 'image').
+ */
+export function messagesContainImageBlocks(messages: Message[]): boolean {
+  for (const msg of messages) {
+    if (msg.type !== 'user') continue
+    const content = (msg as { message?: { content?: unknown } }).message
+      ?.content
+    if (!Array.isArray(content)) continue
+    for (const block of content as Array<{ type?: string }>) {
+      if (typeof block === 'object' && block?.type === 'image') return true
+    }
+  }
+  return false
+}
+
+/**
  * Calculate the character content length of an assistant message.
  * Used for spinner token estimation (characters / 4 ≈ tokens).
  * This is used when subagent streaming events are filtered out and we

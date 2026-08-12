@@ -39,7 +39,11 @@ import { createBaseHookInput, executeStatusLineCommand } from '../utils/hooks.js
 import { getLastAssistantMessage } from '../utils/messages.js';
 import { getRuntimeMainLoopModel, type ModelName, renderModelName } from '../utils/model/model.js';
 import { getCurrentSessionTitle } from '../utils/sessionStorage.js';
-import { doesMostRecentAssistantMessageExceed200k, getCurrentUsage } from '../utils/tokens.js';
+import {
+  doesMostRecentAssistantMessageExceed200k,
+  getCurrentUsage,
+  messagesContainImageBlocks,
+} from '../utils/tokens.js';
 import { getCurrentWorktreeSession } from '../utils/worktree.js';
 import { isVimModeEnabled } from './PromptInput/utils.js';
 import { computeHitRate, tokenSignature } from '../utils/cacheStats.js';
@@ -228,6 +232,7 @@ function buildStatusLineCommandInput(
     permissionMode,
     mainLoopModel,
     exceeds200kTokens,
+    hasImageBlocks: messagesContainImageBlocks(messages),
   });
   const outputStyleName = settings?.outputStyle || DEFAULT_OUTPUT_STYLE_NAME;
 
@@ -519,6 +524,7 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
     permissionMode,
     mainLoopModel,
     exceeds200kTokens: previousStateRef.current.exceeds200kTokens,
+    hasImageBlocks: messagesContainImageBlocks(messagesRef.current),
   });
   const builtinContextWindowSize = getContextWindowForModel(builtinRuntimeModel, getSdkBetas());
   const builtinCurrentUsage = getCurrentUsage(messagesRef.current);

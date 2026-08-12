@@ -247,6 +247,27 @@ export function getDefaultFableModel(): ModelName {
   return getDefaultOpusModel()
 }
 
+// CCB: Vision tier — 多模态专用档位，用于含图像的请求自动路由或手动切换。
+// env-only 配置：ANTHROPIC_DEFAULT_VISION_MODEL / GEMINI_DEFAULT_VISION_MODEL。
+// 未配置时回退到 Sonnet（Claude 4+ 默认支持视觉），3P provider 回退到主模型 env。
+export function getDefaultVisionModel(): ModelName {
+  const provider = getAPIProvider()
+  const openAIModel = getOpenAIModelForTier(provider, 'sonnet')
+  if (openAIModel) return openAIModel
+  if (provider === 'gemini' && process.env.GEMINI_DEFAULT_VISION_MODEL) {
+    return process.env.GEMINI_DEFAULT_VISION_MODEL
+  }
+  if (process.env.ANTHROPIC_DEFAULT_VISION_MODEL) {
+    return process.env.ANTHROPIC_DEFAULT_VISION_MODEL
+  }
+  // 3P providers: fall back to user's primary model (OPENAI_MODEL/GEMINI_MODEL/GROK_MODEL)
+  // to avoid routing multimodal requests to Anthropic when the user configured a 3P endpoint.
+  const primaryModel = getProviderPrimaryModel()
+  if (primaryModel) return primaryModel
+  // 兜底：Sonnet 4.6（Claude 4+ 默认支持视觉）
+  return getDefaultSonnetModel()
+}
+
 /**
  * Get the model to use for runtime, depending on the runtime context.
  * @param params Subset of the runtime context to determine the model to use.
@@ -256,8 +277,14 @@ export function getRuntimeMainLoopModel(params: {
   permissionMode: PermissionMode
   mainLoopModel: string
   exceeds200kTokens?: boolean
+  hasImageBlocks?: boolean
 }): ModelName {
-  const { permissionMode, mainLoopModel, exceeds200kTokens = false } = params
+  const {
+    permissionMode,
+    mainLoopModel,
+    exceeds200kTokens = false,
+    hasImageBlocks = false,
+  } = params
 
   // opusplan uses Opus in plan mode without [1m] suffix.
   if (
@@ -271,6 +298,18 @@ export function getRuntimeMainLoopModel(params: {
   // sonnetplan by default
   if (getUserSpecifiedModelSetting() === 'haiku' && permissionMode === 'plan') {
     return getDefaultSonnetModel()
+  }
+
+  // Vision auto-routing: when the turn contains image blocks AND the user
+  // hasn't explicitly pinned a model (i.e., running on the default tier),
+  // route to the Vision tier. Explicit /model opus etc. takes precedence —
+  // never override user intent. Disable via CLAUDE_CODE_DISABLE_VISION_ROUTING=1.
+  if (
+    hasImageBlocks &&
+    getUserSpecifiedModelSetting() === undefined &&
+    process.env.CLAUDE_CODE_DISABLE_VISION_ROUTING !== '1'
+  ) {
+    return getDefaultVisionModel()
   }
 
   return mainLoopModel
@@ -583,6 +622,8 @@ export function parseUserSpecifiedModel(
         return getDefaultOpusModel() + (has1mTag ? '[1m]' : '')
       case 'fable':
         return getDefaultFableModel() + (has1mTag ? '[1m]' : '')
+      case 'vision':
+        return getDefaultVisionModel() + (has1mTag ? '[1m]' : '')
       case 'best':
         return getBestModel()
       default:
