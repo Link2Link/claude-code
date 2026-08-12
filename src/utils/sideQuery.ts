@@ -205,7 +205,11 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
   const provider = customConfig
     ? getCustomModelProtocol(customConfig)
     : getAPIProvider()
-  if (provider === 'openai' || provider === 'grok') {
+  if (
+    provider === 'openai' ||
+    provider === 'grok' ||
+    provider === 'responses'
+  ) {
     return sideQueryViaOpenAICompatible(opts)
   }
   if (provider === 'gemini') {

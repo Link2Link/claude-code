@@ -14,6 +14,11 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { logMock } from '../../../tests/mocks/log'
 import { debugMock } from '../../../tests/mocks/debug'
+import {
+  getSessionSettingsCache,
+  resetSettingsCache,
+  setSessionSettingsCache,
+} from '../settings/settingsCache.js'
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
@@ -267,6 +272,63 @@ describe('sideQuery OpenAI ChatGPT OAuth path', () => {
     expect(result.stop_reason).toBe('tool_use')
     expect(result.usage.input_tokens).toBe(11)
     expect(result.usage.output_tokens).toBe(7)
+  })
+
+  test('routes custom Responses models through the configured endpoint', async () => {
+    const previousSettingsCache = getSessionSettingsCache()
+    setSessionSettingsCache({
+      settings: {
+        customModels: [
+          {
+            model: 'gpt-responses-test',
+            protocol: 'responses',
+            baseUrl: 'https://responses.example.test/v1',
+            apiKey: 'sk-test-not-real',
+          },
+        ],
+      },
+      errors: [],
+    })
+
+    try {
+      const { sideQuery } = await import('../sideQuery.js')
+      const result = await sideQuery({
+        querySource: 'auto_mode',
+        model: 'gpt-responses-test',
+        system: 'You are a classifier.',
+        messages: [{ role: 'user', content: 'classify this action' }],
+        tools: [classifierTool as never],
+        tool_choice: { type: 'tool', name: 'classify_result' },
+        max_tokens: 256,
+      })
+
+      expect(getOpenAIClientCallCount).toBe(0)
+      expect(chatCompletionsCreateCount).toBe(0)
+      expect(capturedFetch).not.toBeNull()
+      expect(capturedFetch!.url).toBe(
+        'https://responses.example.test/v1/responses',
+      )
+      expect(capturedFetch!.headers.Authorization).toBe(
+        'Bearer sk-test-not-real',
+      )
+      expect(capturedFetch!.body.model).toBe('gpt-responses-test')
+      expect(capturedFetch!.body.tool_choice).toEqual({
+        type: 'function',
+        name: 'classify_result',
+      })
+
+      const toolUse = result.content.find(b => b.type === 'tool_use') as
+        | { type: 'tool_use'; name: string; input: unknown }
+        | undefined
+      expect(toolUse?.name).toBe('classify_result')
+      expect(toolUse?.input).toEqual({ shouldBlock: false, reason: 'ok' })
+      expect(result.stop_reason).toBe('tool_use')
+    } finally {
+      resetSettingsCache()
+      if (previousSettingsCache) {
+        setSessionSettingsCache(previousSettingsCache)
+      }
+    }
   })
 
   test('official API key mode uses a session cache key and normalized usage', async () => {
