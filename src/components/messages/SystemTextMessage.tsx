@@ -7,7 +7,6 @@ import { useState } from 'react';
 import sample from 'lodash-es/sample.js';
 import { BLACK_CIRCLE, REFERENCE_MARK, TEARDROP_ASTERISK } from '../../constants/figures.js';
 import figures from 'figures';
-import { basename } from 'path';
 import { MessageResponse } from '../MessageResponse.js';
 
 import { openPath } from '../../utils/browser.js';
@@ -376,7 +375,7 @@ function MemoryFileRow({ path }: { path: string }): React.ReactNode {
     <MessageResponse>
       <Box onClick={() => void openPath(path)} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
         <Text dimColor={!hover} underline={hover}>
-          <FilePathLink filePath={path}>{basename(path)}</FilePathLink>
+          <FilePathLink filePath={path}>{path}</FilePathLink>
         </Text>
       </Box>
     </MessageResponse>
