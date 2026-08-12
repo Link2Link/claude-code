@@ -26,7 +26,10 @@ import {
   type ModelSetting,
   parseUserSpecifiedModel,
 } from './model/model.js'
-import { getAPIProvider } from './model/providers.js'
+import {
+  getAPIProvider,
+  isFirstPartyAnthropicBaseUrl,
+} from './model/providers.js'
 import { isEssentialTrafficOnly } from './privacyLevel.js'
 import {
   getInitialSettings,
@@ -72,6 +75,12 @@ function getDisabledReasonMessage(
 export function getFastModeUnavailableReason(): string | null {
   if (!isFastModeEnabled()) {
     return 'Fast mode is not available'
+  }
+
+  // 自建网关/代理环境（非官方 base URL）：跳过官方 API 的可用性检查。
+  // fast 模式退化为本地开关（无官方加速效果），任何环境都允许开启。
+  if (!isFirstPartyAnthropicBaseUrl()) {
+    return null
   }
 
   const statigReason = getFeatureValue_CACHED_MAY_BE_STALE(
@@ -169,6 +178,10 @@ export function isFastModeSupportedByModel(
 ): boolean {
   if (!isFastModeEnabled()) {
     return false
+  }
+  // 自建网关/代理环境：任何模型都支持 fast 模式开关
+  if (!isFirstPartyAnthropicBaseUrl()) {
+    return true
   }
   const model = modelSetting ?? getDefaultMainLoopModelSetting()
   const parsedModel = parseUserSpecifiedModel(model)

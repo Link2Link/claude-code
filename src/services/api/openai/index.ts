@@ -34,6 +34,7 @@ import {
   createChatGPTResponsesStream,
   createResponsesStream,
   type ResponsesReasoningEffort,
+  type ResponsesServiceTier,
 } from './responsesAdapter.js'
 import { normalizeMessagesForAPI } from '../../../utils/messages.js'
 import { toolToAPISchema } from '../../../utils/api.js'
@@ -42,6 +43,10 @@ import {
   toolMatchesName,
 } from '../../../Tool.js'
 import { logForDebugging } from '../../../utils/debug.js'
+import {
+  isFastModeCooldown,
+  isFastModeEnabled,
+} from '../../../utils/fastMode.js'
 import { addToTotalSessionCost } from '../../../cost-tracker.js'
 import { calculateUSDCost } from '../../../utils/modelCost.js'
 import {
@@ -325,6 +330,15 @@ export async function* queryModelOpenAI(
       options.effortValue,
     )
 
+    // Fast mode on the Responses protocol: the local toggle maps to the
+    // upstream "priority" service tier. Anthropic availability checks don't
+    // apply to OpenAI/ChatGPT endpoints, so only the global switch, the
+    // user setting and the cooldown state gate the header.
+    const responsesServiceTier: ResponsesServiceTier | undefined =
+      isFastModeEnabled() && !!options.fastMode && !isFastModeCooldown()
+        ? 'priority'
+        : undefined
+
     // 9. Log tool filtering details
     if (useSearchExtraTools) {
       const includedDeferredTools = filteredTools.filter(t =>
@@ -399,6 +413,7 @@ export async function* queryModelOpenAI(
               tools: openaiTools,
               toolChoice: openaiToolChoice,
               reasoningEffort,
+              serviceTier: responsesServiceTier,
             }),
             baseUrl: customConfig!.baseUrl ?? '',
             apiKey: resolveCustomModelApiKey(customConfig!) ?? '',
@@ -416,6 +431,7 @@ export async function* queryModelOpenAI(
                 tools: openaiTools,
                 toolChoice: openaiToolChoice,
                 reasoningEffort,
+                serviceTier: responsesServiceTier,
                 promptCacheKey: sessionPromptCacheKey,
               }),
               signal,

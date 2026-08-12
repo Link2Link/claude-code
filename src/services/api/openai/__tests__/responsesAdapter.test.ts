@@ -44,6 +44,29 @@ describe('buildResponsesRequest', () => {
     expect('max_output_tokens' in request).toBe(false)
   })
 
+  test('includes service_tier priority when fast mode requests it', () => {
+    const request = buildResponsesRequest({
+      model: 'gpt-5.6-sol',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      toolChoice: undefined,
+      serviceTier: 'priority',
+    })
+
+    expect(request.service_tier).toBe('priority')
+  })
+
+  test('omits service_tier when fast mode is off', () => {
+    const request = buildResponsesRequest({
+      model: 'gpt-5.6-sol',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      toolChoice: undefined,
+    }) as Record<string, unknown>
+
+    expect('service_tier' in request).toBe(false)
+  })
+
   test('includes stable prompt_cache_key for session-sticky cache routing', () => {
     const request = buildResponsesRequest({
       model: 'gpt-5.6-sol',

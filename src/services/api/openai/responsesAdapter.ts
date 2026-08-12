@@ -12,6 +12,9 @@ export type ResponsesReasoningEffort =
   | 'xhigh'
   | 'max'
 
+/** OpenAI Responses API service tiers — "priority" requests higher-priority processing. */
+export type ResponsesServiceTier = 'auto' | 'default' | 'priority'
+
 type ResponsesRequest = {
   model: string
   stream: true
@@ -21,6 +24,7 @@ type ResponsesRequest = {
   tools?: ResponsesTool[]
   tool_choice?: unknown
   reasoning?: { effort: ResponsesReasoningEffort }
+  service_tier?: ResponsesServiceTier
   parallel_tool_calls?: boolean
   /** Sticky cache routing key — stable for the CCB session. Optional for custom endpoints. */
   prompt_cache_key?: string
@@ -169,6 +173,8 @@ export function buildResponsesRequest(params: {
   tools: unknown[]
   toolChoice: unknown
   reasoningEffort?: ResponsesReasoningEffort
+  /** Set when fast mode is active — requests priority processing upstream. */
+  serviceTier?: ResponsesServiceTier
   /** Session-scoped key supplied only by the ChatGPT OAuth / official route. */
   promptCacheKey?: string
 }): ResponsesRequest {
@@ -189,6 +195,7 @@ export function buildResponsesRequest(params: {
     ...(params.reasoningEffort
       ? { reasoning: { effort: params.reasoningEffort } }
       : {}),
+    ...(params.serviceTier ? { service_tier: params.serviceTier } : {}),
     parallel_tool_calls: true,
     // Same OAuth session → same key so OpenAI can sticky-route to a cache node.
     // Must not hash the full message list (would change every turn). Custom

@@ -108,7 +108,6 @@ describe('Console command availability', () => {
     test(`rejects settings modelType=${modelType}`, () => {
       setModelType(modelType)
 
-      expect(meetsAvailabilityRequirement(fast)).toBe(false)
       expect(meetsAvailabilityRequirement(installGitHubApp)).toBe(false)
     })
   }
@@ -117,15 +116,18 @@ describe('Console command availability', () => {
     test(`rejects ${envKey}`, () => {
       process.env[envKey] = '1'
 
-      expect(meetsAvailabilityRequirement(fast)).toBe(false)
       expect(meetsAvailabilityRequirement(installGitHubApp)).toBe(false)
     })
   }
 
   test('continues accepting direct first-party Anthropic', () => {
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'provider-gates-test-token'
-    expect(meetsAvailabilityRequirement(fast)).toBe(true)
     expect(meetsAvailabilityRequirement(installGitHubApp)).toBe(true)
+  })
+
+  test('fast command has no availability gate', () => {
+    setModelType('openai')
+    expect(meetsAvailabilityRequirement(fast)).toBe(true)
   })
 })
 
