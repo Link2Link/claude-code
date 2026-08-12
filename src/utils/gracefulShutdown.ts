@@ -89,6 +89,17 @@ function cleanupTerminalModes(): void {
         // so printResumeHint still hits the main buffer.
         writeSync(1, EXIT_ALT_SCREEN)
       }
+    } else if (inst) {
+      // Non-alt-screen REPL: Ink's last rendered frame (input box bottom
+      // border, typeahead suggestions, footer notifications, …) stays on
+      // the main screen as static text after unmount — bash inherits the
+      // cursor where Ink left it (end of the input line) and the rendered
+      // chrome below remains visible, leaving a stale slash-command list
+      // on screen. Move past the input row and erase to end of screen so
+      // the shell prompt lands on a clean new line. No-op when nothing
+      // was rendered below the cursor. Skipped when there's no Ink
+      // instance (non-interactive paths).
+      writeSync(1, '\r\n\x1b[J')
     }
     // Catches events that arrived during the unmount tree-walk.
     // detachForShutdown() below also drains.
