@@ -7,6 +7,8 @@
  */
 
 import { useCallback, useState } from 'react'
+import useApp from './use-app.js'
+import { useDoublePress } from './useDoublePress.js'
 import useInput from './use-input.js'
 
 export type ExitState = {
@@ -15,78 +17,45 @@ export type ExitState = {
 }
 
 /**
- * Minimal double-press exit handler.
- * First Ctrl+C/D shows pending state, second press within timeout fires onExit.
- */
-const DOUBLE_PRESS_TIMEOUT_MS = 800
-
-function useDoublePress(
-  setPending: (pending: boolean) => void,
-  onDoublePress: () => void,
-): () => void {
-  let lastPress = 0
-  let timeout: ReturnType<typeof setTimeout> | undefined
-
-  return () => {
-    const now = Date.now()
-    const timeSince = now - lastPress
-    const isDouble =
-      timeSince <= DOUBLE_PRESS_TIMEOUT_MS && timeout !== undefined
-
-    if (isDouble) {
-      clearTimeout(timeout)
-      timeout = undefined
-      setPending(false)
-      onDoublePress()
-    } else {
-      setPending(true)
-      clearTimeout(timeout)
-      timeout = setTimeout(() => {
-        setPending(false)
-        timeout = undefined
-      }, DOUBLE_PRESS_TIMEOUT_MS)
-    }
-    lastPress = now
-  }
-}
-
-/**
  * Stub that provides ExitState for Ctrl+C/D double-press UI.
  * In the standalone package, this uses useInput directly rather than the
  * keybinding system.
  */
 export function useExitOnCtrlCDWithKeybindings(
-  _onExit?: () => void,
-  _onInterrupt?: () => boolean,
+  onExit?: () => void,
+  onInterrupt?: () => boolean,
   isActive: boolean = true,
 ): ExitState {
+  const { exit } = useApp()
   const [exitState, setExitState] = useState<ExitState>({
     pending: false,
     keyName: null,
   })
 
+  const exitFn = useCallback(() => {
+    ;(onExit ?? exit)()
+  }, [onExit, exit])
+
   const handleCtrlC = useDoublePress(
-    (pending: boolean) =>
-      setExitState({ pending, keyName: pending ? 'Ctrl-C' : null }),
-    () => process.exit(0),
+    pending => setExitState({ pending, keyName: pending ? 'Ctrl-C' : null }),
+    exitFn,
   )
 
   const handleCtrlD = useDoublePress(
-    (pending: boolean) =>
-      setExitState({ pending, keyName: pending ? 'Ctrl-D' : null }),
-    () => process.exit(0),
+    pending => setExitState({ pending, keyName: pending ? 'Ctrl-D' : null }),
+    exitFn,
   )
 
   const handleInput = useCallback(
     (_input: string, key: { ctrl?: boolean; name?: string }) => {
       if (!isActive) return
       if (key.ctrl && key.name === 'c') {
-        handleCtrlC()
+        if (!onInterrupt?.()) handleCtrlC()
       } else if (key.ctrl && key.name === 'd') {
         handleCtrlD()
       }
     },
-    [isActive, handleCtrlC, handleCtrlD],
+    [isActive, onInterrupt, handleCtrlC, handleCtrlD],
   )
 
   useInput(handleInput, { isActive })

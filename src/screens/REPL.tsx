@@ -4547,13 +4547,23 @@ export function REPL({
       );
       return;
     }
-    const exitMod = await exit.load();
-    const exitFlowResult = await exitMod.call(() => {});
-    setExitFlow(exitFlowResult);
-    // If call() returned without killing the process (bg session detach),
-    // clear isExiting so the UI is usable on reattach. No-op on the normal
-    // path — gracefulShutdown's process.exit() means we never get here.
-    if (exitFlowResult === null) {
+    try {
+      const exitMod = await exit.load();
+      const exitFlowResult = await exitMod.call(() => {});
+      setExitFlow(exitFlowResult);
+      // If call() returned without killing the process (bg session detach),
+      // clear isExiting so the UI is usable on reattach. No-op on the normal
+      // path — gracefulShutdown's process.exit() means we never get here.
+      if (exitFlowResult === null) {
+        setIsExiting(false);
+      }
+    } catch (err) {
+      // Never strand the REPL in isExiting. While isExiting is true the
+      // PromptInput is unmounted and raw mode stays active, so a failed or
+      // aborted exit leaves Ctrl+C with no handler — the terminal appears
+      // hung and no SIGINT reaches the OS. Restore the input so the user
+      // can retry the exit or keep working.
+      logError(err as Error);
       setIsExiting(false);
     }
   }, []);

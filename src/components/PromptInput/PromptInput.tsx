@@ -1982,11 +1982,50 @@ function PromptInput({
     },
   );
 
+  const idleExitCtrlC = useDoublePress(
+    show => setExitMessage({ show, key: 'Ctrl-C' }),
+    () => onExit(),
+    () => {
+      if (input) {
+        onChange('');
+        setCursorOffset(0);
+        resetHistory();
+      }
+    },
+  );
+
+  // Ctrl+D keeps its own double-press state so the two keys never chain
+  // (Ctrl+C → Ctrl+D within the timeout must not count as a double press)
+  // and the footer hint shows the key the user actually pressed.
+  const idleExitCtrlD = useDoublePress(
+    show => setExitMessage({ show, key: 'Ctrl-D' }),
+    () => onExit(),
+  );
+
   useInput((char, key) => {
     // Skip all input handling when a full-screen dialog is open. These dialogs
     // render via early return, but hooks run unconditionally — so without this
     // guard, Escape inside a dialog leaks to the double-press message-selector.
     if (showTeamsDialog || showQuickOpen || showGlobalSearch || showHistoryPicker) {
+      return;
+    }
+
+    // Idle Ctrl+C/D fallback (InputLostFocus path). When the input field is
+    // unfocused (e.g. a footer pill is selected), BaseTextInput's useInput is
+    // inactive, so Ctrl+C no longer reaches useTextInput's double-press exit.
+    // CancelRequestHandler also skips Ctrl+C when nothing is running/queued,
+    // and Ink's App handleInput only fires when exitOnCtrlC=true (which the
+    // main REPL root disables). Raw mode then swallows the byte entirely —
+    // no SIGINT reaches the OS — leaving the terminal appearing hung.
+    // This hook keeps the double-press exit alive in those states. When a
+    // request IS running, CancelRequestHandler's app:interrupt matches first
+    // and stopImmediatePropagation shields this fallback.
+    if (key.ctrl && char === 'c' && !isLoading) {
+      idleExitCtrlC();
+      return;
+    }
+    if (key.ctrl && char === 'd' && input === '' && !isLoading) {
+      idleExitCtrlD();
       return;
     }
 
