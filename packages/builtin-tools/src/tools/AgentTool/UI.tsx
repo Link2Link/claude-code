@@ -791,6 +791,25 @@ export function renderGroupedAgentToolUse(
       taskDescription = undefined;
     }
 
+    // Resolve the model this agent runs with. Prefer the resolved model carried
+    // on the first progress message (AgentTool's call() computes it via
+    // getAgentModel); fall back to the tool input's explicit model, then the
+    // main loop model (agents inherit it by default).
+    let model: string | undefined;
+    const firstProgressData = progressMessages[0]?.data;
+    if (firstProgressData && hasProgressMessage(firstProgressData)) {
+      const progressModel = (firstProgressData as { model?: string }).model;
+      if (progressModel) {
+        model = renderModelName(parseUserSpecifiedModel(progressModel));
+      }
+    }
+    if (!model && parsedInput.success && parsedInput.data.model) {
+      model = renderModelName(parseUserSpecifiedModel(parsedInput.data.model));
+    }
+    if (!model) {
+      model = renderModelName(getMainLoopModel());
+    }
+
     // Check if this was launched as a background agent OR backgrounded mid-execution
     const launchedAsAsync =
       parsedInput.success && 'run_in_background' in parsedInput.data && parsedInput.data.run_in_background === true;
@@ -804,6 +823,7 @@ export function renderGroupedAgentToolUse(
       id: param.id,
       agentType,
       description,
+      model,
       toolUseCount: stats.toolUseCount,
       tokens: stats.tokens,
       isResolved,
@@ -859,6 +879,7 @@ export function renderGroupedAgentToolUse(
           key={stat.id}
           agentType={stat.agentType}
           description={stat.description}
+          model={stat.model}
           descriptionColor={stat.descriptionColor}
           taskDescription={stat.taskDescription}
           toolUseCount={stat.toolUseCount}

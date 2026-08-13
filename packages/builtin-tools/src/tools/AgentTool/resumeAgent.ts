@@ -202,6 +202,7 @@ export async function resumeAgentBackground({
     prompt,
     selectedAgent,
     setAppState: rootSetAppState,
+    model: resolvedAgentModel,
     toolUseId: toolUseContext.toolUseId,
   })
 

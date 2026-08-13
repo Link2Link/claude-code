@@ -9,6 +9,7 @@ type Props = {
   name?: string;
   descriptionColor?: keyof Theme;
   taskDescription?: string;
+  model?: string;
   toolUseCount: number;
   tokens: number | null;
   color?: keyof Theme;
@@ -27,6 +28,7 @@ export function AgentProgressLine({
   name,
   descriptionColor,
   taskDescription,
+  model,
   toolUseCount,
   tokens,
   color,
@@ -56,6 +58,12 @@ export function AgentProgressLine({
     <Box flexDirection="column">
       <Box paddingLeft={3}>
         <Text dimColor>{treeChar} </Text>
+        {model && (
+          <>
+            <Text color="green_FOR_SUBAGENTS_ONLY">[{model}]</Text>
+            <Text dimColor> </Text>
+          </>
+        )}
         <Text dimColor={!isResolved}>
           {hideType ? (
             <>

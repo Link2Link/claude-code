@@ -4,15 +4,23 @@ import { useElapsedTime } from '../../hooks/useElapsedTime.js';
 import { useAppState } from '../../state/AppState.js';
 import type { LocalAgentTaskState } from '../../tasks/LocalAgentTask/LocalAgentTask.js';
 import { formatTokens } from '../../utils/format.js';
+import { parseUserSpecifiedModel, getMainLoopModel, renderModelName } from '../../utils/model/model.js';
 
 function AgentRow({ task, selected }: { task: LocalAgentTaskState; selected: boolean }) {
   const elapsed = useElapsedTime(task.startTime, task.status === 'running');
   const tokens = task.progress?.tokenCount ?? 0;
   const isRunning = task.status === 'running';
+  const model = task.model ? renderModelName(parseUserSpecifiedModel(task.model)) : undefined;
   return (
     <Box flexDirection="row" width="100%" justifyContent="space-between">
       <Box flexDirection="row" flexShrink={1}>
         <Text color={isRunning ? 'success' : undefined}>{selected ? '● ' : '○ '}</Text>
+        {model && (
+          <>
+            <Text color="green_FOR_SUBAGENTS_ONLY">[{model}]</Text>
+            <Text dimColor> </Text>
+          </>
+        )}
         <Text bold={selected} wrap="truncate-end">
           {task.agentType} <Text dimColor>{task.description}</Text>
         </Text>
@@ -48,11 +56,17 @@ export function BackgroundAgentSelector(): React.ReactNode {
     : (viewingId ?? null);
   const mainHighlighted = pillFocused ? selectedBgIndex === -1 : viewingId === undefined;
   const viewedTask = viewingId ? (tasks.find(t => t.agentId === viewingId) ?? null) : null;
+  const mainModel = renderModelName(parseUserSpecifiedModel(getMainLoopModel()));
 
   return (
     <Box flexDirection="column" width="100%">
       <Box flexDirection="row" width="100%" justifyContent="space-between">
-        <Text bold={mainHighlighted}>{mainHighlighted ? '● ' : '○ '}main</Text>
+        <Box flexDirection="row" flexShrink={1}>
+          <Text bold={mainHighlighted}>{mainHighlighted ? '● ' : '○ '}</Text>
+          <Text color="green_FOR_SUBAGENTS_ONLY">[{mainModel}]</Text>
+          <Text dimColor> </Text>
+          <Text bold={mainHighlighted}>main</Text>
+        </Box>
         <Text dimColor>{getHint(pillFocused, viewedTask)}</Text>
       </Box>
       {tasks.map(task => (

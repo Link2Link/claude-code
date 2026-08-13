@@ -834,6 +834,7 @@ export const AgentTool = buildTool({
         prompt,
         selectedAgent,
         setAppState: rootSetAppState,
+        model: resolvedAgentModel,
         // Don't link to parent's abort controller -- background agents should
         // survive when the user presses ESC to cancel the main thread.
         // They are killed explicitly via chat:killAgents.
@@ -951,6 +952,7 @@ export const AgentTool = buildTool({
                   type: 'agent_progress',
                   prompt,
                   agentId: syncAgentId,
+                  model: resolvedAgentModel,
                 },
               });
             }
@@ -971,6 +973,7 @@ export const AgentTool = buildTool({
               prompt,
               selectedAgent,
               setAppState: rootSetAppState,
+              model: resolvedAgentModel,
               toolUseId: toolUseContext.toolUseId,
               autoBackgroundMs: getAutoBackgroundMs() || undefined,
             });
