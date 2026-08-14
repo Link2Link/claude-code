@@ -2641,10 +2641,11 @@ export function REPL({
     void mrOnTurnComplete(messagesRef.current, true);
   }
 
-  // Function to handle queued command when canceling a permission request
-  const handleQueuedCommandOnCancel = useCallback(() => {
+  // Function to handle queued command when canceling a permission request.
+  // Returns true if a queued command was actually popped into the input.
+  const handleQueuedCommandOnCancel = useCallback((): boolean => {
     const result = popAllEditable(inputValue, 0);
-    if (!result) return;
+    if (!result) return false;
     setInputValue(result.text);
     setInputMode('prompt');
 
@@ -2658,6 +2659,7 @@ export function REPL({
         return newContents;
       });
     }
+    return true;
   }, [setInputValue, setInputMode, inputValue, setPastedContents]);
 
   // CancelRequestHandler props - rendered inside KeybindingSetup

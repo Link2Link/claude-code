@@ -27,7 +27,7 @@ import { fileHistoryEnabled, fileHistoryMakeSnapshot } from './fileHistory.js'
 import { gracefulShutdownSync } from './gracefulShutdown.js'
 import { toError } from './errors.js'
 import { logError } from './log.js'
-import { enqueue } from './messageQueueManager.js'
+import { enqueue, setSuppressTaskNotifications } from './messageQueueManager.js'
 import { resolveSkillModelOverride } from './model/model.js'
 import {
   claimConsumableQueuedAutonomyCommands,
@@ -184,6 +184,10 @@ export async function handlePromptSubmit(
   const input = params.input ?? ''
   const mode = params.mode ?? 'prompt'
   const rawPastedContents = params.pastedContents ?? {}
+
+  // Direct user submission — cancel the post-cancel task-notification
+  // suppression so parked agent summaries flush after this turn ends.
+  setSuppressTaskNotifications(false)
 
   // Images are only sent if their [Image #N] placeholder is still in the text.
   // Deleting the inline pill drops the image; orphaned entries are filtered here.

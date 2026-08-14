@@ -4,6 +4,8 @@ import {
   resetCommandQueue,
   enqueue,
   enqueuePendingNotification,
+  getSuppressTaskNotifications,
+  setSuppressTaskNotifications,
 } from '../messageQueueManager.js'
 import { hasQueuedCommands, processQueueIfReady } from '../queueProcessor.js'
 
@@ -13,6 +15,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resetCommandQueue()
+  setSuppressTaskNotifications(false)
 })
 
 describe('processQueueIfReady', () => {
@@ -159,6 +162,52 @@ describe('processQueueIfReady', () => {
 
     // Subagent command still in queue
     expect(hasQueuedCommands()).toBe(true)
+  })
+
+  test('skips task-notification processing while suppression active', () => {
+    const executed: string[][] = []
+    setSuppressTaskNotifications(true)
+    enqueuePendingNotification({
+      value: '<task/>',
+      mode: 'task-notification',
+    } as any)
+
+    const result = processQueueIfReady({
+      executeInput: async cmds => {
+        executed.push(cmds.map(c => c.value as string))
+      },
+    })
+
+    // Not processed — the notification stays parked so it can't restart a
+    // query loop after a user cancel
+    expect(result.processed).toBe(false)
+    expect(executed).toHaveLength(0)
+    expect(hasQueuedCommands()).toBe(true)
+    expect(getSuppressTaskNotifications()).toBe(true)
+  })
+
+  test('clears suppression when a user prompt command is processed', () => {
+    setSuppressTaskNotifications(true)
+    enqueue({ value: 'hello', mode: 'prompt' } as any)
+
+    const result = processQueueIfReady({
+      executeInput: async () => {},
+    })
+
+    expect(result.processed).toBe(true)
+    expect(getSuppressTaskNotifications()).toBe(false)
+  })
+
+  test('clears suppression when a bash command is processed', () => {
+    setSuppressTaskNotifications(true)
+    enqueue({ value: 'git status', mode: 'bash' } as any)
+
+    const result = processQueueIfReady({
+      executeInput: async () => {},
+    })
+
+    expect(result.processed).toBe(true)
+    expect(getSuppressTaskNotifications()).toBe(false)
   })
 })
 

@@ -2,8 +2,10 @@ import type { QueuedCommand } from '../types/textInputTypes.js'
 import {
   dequeue,
   dequeueAllMatching,
+  getSuppressTaskNotifications,
   hasCommandsInQueue,
   peek,
+  setSuppressTaskNotifications,
 } from './messageQueueManager.js'
 
 type ProcessQueueParams = {
@@ -71,9 +73,19 @@ export function processQueueIfReady({
     return { processed: false }
   }
 
+  // After a user cancel (Ctrl+C/Escape), parked task notifications must not
+  // restart a query on their own: the processor would immediately re-submit
+  // them, keeping canCancelRunningTask true forever and starving the Ctrl+C
+  // double-press exit. They stay parked until the next user submission
+  // clears the suppression (handled in handlePromptSubmit and below).
+  if (next.mode === 'task-notification' && getSuppressTaskNotifications()) {
+    return { processed: false }
+  }
+
   // Slash commands and bash-mode commands are processed individually.
   // Bash commands need per-command error isolation, exit codes, and progress UI.
   if (isSlashCommand(next) || next.mode === 'bash') {
+    setSuppressTaskNotifications(false)
     const cmd = dequeue(isMainThread)!
     void executeInput([cmd])
     return { processed: true }
@@ -81,6 +93,7 @@ export function processQueueIfReady({
 
   // Drain all non-slash-command items with the same mode at once.
   const targetMode = next.mode
+  setSuppressTaskNotifications(false)
   const commands = dequeueAllMatching(
     cmd => isMainThread(cmd) && !isSlashCommand(cmd) && cmd.mode === targetMode,
   )

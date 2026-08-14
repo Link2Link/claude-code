@@ -31,6 +31,7 @@ import {
   clearCommandQueue,
   enqueuePendingNotification,
   hasCommandsInQueue,
+  setSuppressTaskNotifications,
 } from '../utils/messageQueueManager.js'
 import { emitTaskTerminatedSdk } from '../utils/sdkEventQueue.js'
 
@@ -46,7 +47,8 @@ type CancelRequestHandlerProps = {
   isMessageSelectorVisible: boolean
   screen: Screen
   abortSignal?: AbortSignal
-  popCommandFromQueue?: () => void
+  /** Returns true if a queued command was actually popped into the input. */
+  popCommandFromQueue?: () => boolean
   vimMode?: VimMode
   isLocalJSXCommand?: boolean
   isSearchingHistory?: boolean
@@ -84,7 +86,7 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
   const lastKillAgentsPressRef = useRef<number>(0)
   const viewSelectionMode = useAppState(s => s.viewSelectionMode)
 
-  const handleCancel = useCallback(() => {
+  const handleCancel = useCallback((): false | undefined => {
     const cancelProps = {
       source:
         'escape' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -97,6 +99,10 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
     if (abortSignal !== undefined && !abortSignal.aborted) {
       logEvent('tengu_cancel', cancelProps)
       setToolUseConfirmQueue(() => [])
+      // Stop background-agent completion notifications from auto-restarting
+      // a query after this cancel — that loop kept canCancelRunningTask true
+      // and starved the Ctrl+C double-press exit.
+      setSuppressTaskNotifications(true)
       onCancel()
       return
     }
@@ -104,8 +110,11 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
     // Priority 2: Pop queue when Claude is idle (no running task to cancel)
     if (hasCommandsInQueue()) {
       if (popCommandFromQueue) {
-        popCommandFromQueue()
-        return
+        if (popCommandFromQueue()) return
+        // Nothing editable was popped (e.g. only task notifications queued).
+        // Don't consume the keypress — let it fall through to the double-press
+        // exit handlers instead of silently swallowing it.
+        return false
       }
     }
 
@@ -197,14 +206,21 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
   // Ctrl+C (app:interrupt). Scoped to teammate-view: killing agents from the
   // main prompt stays a deliberate gesture (chat:killAgents), not a
   // side-effect of cancelling a turn.
-  const handleInterrupt = useCallback(() => {
+  const handleInterrupt = useCallback((): false | undefined => {
+    let consumed = false
     if (isViewingTeammate) {
       killAllAgentsAndNotify()
       exitTeammateView(setAppState)
+      consumed = true
     }
     if (canCancelRunningTask || hasQueuedCommands) {
-      handleCancel()
+      const handled = handleCancel()
+      if (handled === undefined) consumed = true
     }
+    // Return undefined when consumed so the keybinding stops propagation;
+    // return false when nothing was actually cancelled/popped so the keypress
+    // falls through to the double-press exit handlers.
+    return consumed ? undefined : false
   }, [
     isViewingTeammate,
     killAllAgentsAndNotify,

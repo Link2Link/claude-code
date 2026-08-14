@@ -55,6 +55,21 @@ const commandQueue: QueuedCommand[] = []
 let snapshot: readonly QueuedCommand[] = Object.freeze([])
 const queueChanged = createSignal()
 
+// Set when the user cancels a running request (Ctrl+C / Escape). While set,
+// the queue processor skips auto-submitting 'task-notification' commands, so
+// background agent completions can't restart a query loop that would keep
+// `canCancelRunningTask` true forever and starve the Ctrl+C double-press
+// exit. Cleared on the next user-initiated submission.
+let suppressTaskNotifications = false
+
+export function setSuppressTaskNotifications(v: boolean): void {
+  suppressTaskNotifications = v
+}
+
+export function getSuppressTaskNotifications(): boolean {
+  return suppressTaskNotifications
+}
+
 function notifySubscribers(): void {
   snapshot = Object.freeze([...commandQueue])
   queueChanged.emit()
