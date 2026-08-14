@@ -170,7 +170,8 @@ Plan mode 默认使用 auto mode 语义（`getUseAutoModeDuringPlan()`，默认 
 
 当分类器 API 不可用时（`unavailable: true` 或 `transcriptTooLong: true`）：
 
-- 不会直接 allow — 回退到传统的权限对话框（ask）
+- **应用层降档重试**（`yoloClassifier.ts` 的 `classifyYoloActionWithFallback`）：主模型调用因瞬时 API 错误失败时，按 opus -> sonnet -> haiku 档位链逐档重试（每档通过档位 getter 查询实际配置的模型，如 `ANTHROPIC_DEFAULT_SONNET_MODEL` / `OPENAI_DEFAULT_SONNET_MODEL`），某档成功即停止。第三方主模型（无第一方档位归属）从 opus 档开始整链降档；haiku 主模型无降档。确定性错误（transcript 超长）和用户中止不重试。可通过 `CLAUDE_CODE_AUTO_MODE_FALLBACK_MODEL`（ant）或 GrowthBook `tengu_auto_mode_config.fallbackModel` 显式指定单档 fallback
+- 重试仍失败后，不会直接 allow — 回退到传统的权限对话框（ask）
 - 向 AI 发送消息："{model} is temporarily unavailable, so auto mode cannot determine the safety of {toolName} right now."
 - 确定性错误（如对话过长）不重试，直接降级
 

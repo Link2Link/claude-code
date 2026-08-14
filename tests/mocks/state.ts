@@ -83,6 +83,14 @@ export function stateMock() {
     setLastAPIRequestMessages: noop,
     getLastAPIRequestMessages: () => [],
 
+    // Auto mode classifier
+    setLastClassifierRequests: noop,
+    getLastClassifierRequests: () => null,
+    getCachedClaudeMdContent: () => null,
+
+    // Terminal scroll drain
+    waitForScrollIdle: () => Promise.resolve(),
+
     // Various getters (add as needed)
     getIsNonInteractiveSession: () => false,
     getSdkAgentProgressSummariesEnabled: () => false,

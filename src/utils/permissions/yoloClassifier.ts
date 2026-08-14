@@ -28,7 +28,13 @@ import { errorMessage } from '../errors.js'
 import { lazySchema } from '../lazySchema.js'
 import { extractTextContent } from '../messages.js'
 import { resolveAntModel } from '../model/antModels.js'
-import { getDefaultSonnetModel, getMainLoopModel } from '../model/model.js'
+import {
+  firstPartyNameToCanonical,
+  getDefaultHaikuModel,
+  getDefaultOpusModel,
+  getDefaultSonnetModel,
+  getMainLoopModel,
+} from '../model/model.js'
 import { isPoorModeActive } from '../../commands/poor/poorMode.js'
 import { getAutoModeConfig } from '../settings/settings.js'
 import { sideQuery } from '../sideQuery.js'
@@ -1118,30 +1124,74 @@ export async function classifyYoloAction(
     cache_control: cacheControl,
   })
 
-  const model = getClassifierModel()
-
-  // Dispatch to 2-stage XML classifier if enabled via GrowthBook
-  if (isTwoStageClassifierEnabled()) {
-    return classifyYoloActionXml(
-      prefixMessages,
-      systemPrompt,
-      userPrompt,
-      userContentBlocks,
-      model,
-      promptLengths,
-      signal,
-      {
-        mainLoopTokens: mainLoopTokens ?? tokenCountWithEstimation(messages),
-        classifierChars,
-        classifierTokensEst,
-        transcriptEntries: transcriptEntries.length,
-        messages: messages.length,
-        action: actionCompact,
-      },
-      getTwoStageMode(),
-      parentSpan,
-    )
+  const dumpContextInfo = {
+    mainLoopTokens: mainLoopTokens ?? tokenCountWithEstimation(messages),
+    classifierChars,
+    classifierTokensEst,
+    transcriptEntries: transcriptEntries.length,
+    messages: messages.length,
+    action: actionCompact,
   }
+
+  // Application-level fallback: run the primary tier, and when it fails with
+  // a transient API error, retry once on the next tier down before surfacing
+  // unavailability. Per-attempt dispatch: 2-stage XML if enabled via GrowthBook.
+  const attempt = (model: string): Promise<YoloClassifierResult> =>
+    isTwoStageClassifierEnabled()
+      ? classifyYoloActionXml(
+          prefixMessages,
+          systemPrompt,
+          userPrompt,
+          userContentBlocks,
+          model,
+          promptLengths,
+          signal,
+          dumpContextInfo,
+          getTwoStageMode(),
+          parentSpan,
+        )
+      : classifyYoloActionJson(
+          prefixMessages,
+          systemPrompt,
+          userPrompt,
+          userContentBlocks,
+          model,
+          promptLengths,
+          signal,
+          dumpContextInfo,
+          parentSpan,
+        )
+
+  return classifyYoloActionWithFallback(getClassifierModel(), attempt, signal)
+}
+
+/**
+ * Single-attempt JSON classifier: one sideQuery with forced tool_use output
+ * (YOLO_CLASSIFIER_TOOL_SCHEMA), temperature 0. Throws are converted into
+ * fail-closed results by the caller-facing classifyYoloAction contract.
+ */
+async function classifyYoloActionJson(
+  prefixMessages: Anthropic.MessageParam[],
+  systemPrompt: string,
+  userPrompt: string,
+  userContentBlocks: Anthropic.TextBlockParam[],
+  model: string,
+  promptLengths: {
+    systemPrompt: number
+    toolCalls: number
+    userPrompts: number
+  },
+  signal: AbortSignal,
+  dumpContextInfo: {
+    mainLoopTokens: number
+    classifierChars: number
+    classifierTokensEst: number
+    transcriptEntries: number
+    messages: number
+    action: string
+  },
+  parentSpan?: LangfuseSpan | null,
+): Promise<YoloClassifierResult> {
   const [disableThinking, thinkingPadding] = getClassifierThinkingConfig(model)
   try {
     const start = Date.now()
@@ -1198,8 +1248,8 @@ export async function classifyYoloAction(
           `(uncached=${usage.inputTokens} ` +
           `cacheRead=${usage.cacheReadInputTokens} ` +
           `cacheCreate=${usage.cacheCreationInputTokens}) ` +
-          `estimateWas=${classifierTokensEst} ` +
-          `deltaVsMainLoop=${classifierInputTokens - mainLoopTokens} ` +
+          `estimateWas=${dumpContextInfo.classifierTokensEst} ` +
+          `deltaVsMainLoop=${classifierInputTokens - dumpContextInfo.mainLoopTokens} ` +
           `durationMs=${durationMs}`,
       )
     }
@@ -1267,9 +1317,9 @@ export async function classifyYoloAction(
     // classifier is bigger than main loop — auto-compact won't save us).
     logAutoModeOutcome('success', model, {
       durationMs,
-      mainLoopTokens,
+      mainLoopTokens: dumpContextInfo.mainLoopTokens,
       classifierInputTokens,
-      classifierTokensEst,
+      classifierTokensEst: dumpContextInfo.classifierTokensEst,
     })
     return classifierResult
   } catch (error) {
@@ -1289,19 +1339,14 @@ export async function classifyYoloAction(
     })
     const errorDumpPath =
       (await dumpErrorPrompts(systemPrompt, userPrompt, error, {
-        mainLoopTokens,
-        classifierChars,
-        classifierTokensEst,
-        transcriptEntries: transcriptEntries.length,
-        messages: messages.length,
-        action: actionCompact,
+        ...dumpContextInfo,
         model,
       })) ?? undefined
     // No API usage on error — use classifierTokensEst / mainLoopTokens
     // for the ratio. Overflow errors are the critical divergence signal.
     logAutoModeOutcome(tooLong ? 'transcript_too_long' : 'error', model, {
-      mainLoopTokens,
-      classifierTokensEst,
+      mainLoopTokens: dumpContextInfo.mainLoopTokens,
+      classifierTokensEst: dumpContextInfo.classifierTokensEst,
       ...(tooLong && {
         transcriptActualTokens: tooLong.actualTokens,
         transcriptLimitTokens: tooLong.limitTokens,
@@ -1324,6 +1369,13 @@ type TwoStageMode = 'both' | 'fast' | 'thinking'
 
 type AutoModeConfig = {
   model?: string
+  /**
+   * Fallback model tier for the classifier's application-level retry. When
+   * the primary classifier call fails with a transient API error, the
+   * classifier retries once on this model before surfacing unavailability.
+   * Defaults to one tier below the primary model (opus→sonnet, sonnet→haiku).
+   */
+  fallbackModel?: string
   /**
    * Enable XML classifier. `true` runs both stages; `'fast'` and `'thinking'`
    * run only that stage; `false`/undefined uses the tool_use classifier.
@@ -1363,6 +1415,97 @@ function getClassifierModel(): string {
     return getDefaultSonnetModel()
   }
   return getMainLoopModel()
+}
+
+/**
+ * Resolve the fallback tier chain for the classifier's application-level
+ * retry: opus → sonnet → haiku, descending one tier per attempt. Tier lookup
+ * goes through the canonical first-party short name (firstPartyNameToCanonical)
+ * so provider prefixes, date suffixes, and [1m] tags normalize before
+ * matching; each tier is then queried through the tier getters
+ * (getDefaultOpusModel etc.), which honor the active provider's tier→model
+ * configuration (e.g. OPENAI_DEFAULT_SONNET_MODEL).
+ *
+ * Chain rules:
+ * - Explicit override (ant env var / GrowthBook fallbackModel) → single-entry
+ *   chain, as configured.
+ * - Primary maps to opus → [sonnet, haiku]; to sonnet → [haiku]; to haiku →
+ *   [] (already lowest tier).
+ * - Primary maps to no first-party tier (third-party/custom models) → start
+ *   from the top: [opus, sonnet, haiku].
+ */
+function getClassifierFallbackModels(primary: string): string[] {
+  if (process.env.USER_TYPE === 'ant') {
+    const envModel = process.env.CLAUDE_CODE_AUTO_MODE_FALLBACK_MODEL
+    if (envModel) return [envModel]
+  }
+  const config = getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_auto_mode_config',
+    {} as AutoModeConfig,
+  )
+  if (config?.fallbackModel) {
+    return [config.fallbackModel]
+  }
+  const canonical = firstPartyNameToCanonical(primary.replace(/\[1m]$/i, ''))
+  if (canonical.includes('-opus-')) {
+    return [getDefaultSonnetModel(), getDefaultHaikuModel()]
+  }
+  if (canonical.includes('-sonnet-')) {
+    return [getDefaultHaikuModel()]
+  }
+  if (canonical.includes('-haiku')) {
+    return []
+  }
+  return [
+    getDefaultOpusModel(),
+    getDefaultSonnetModel(),
+    getDefaultHaikuModel(),
+  ]
+}
+
+/**
+ * Whether a failed classifier result is worth retrying on the fallback tier.
+ * transcriptTooLong is deterministic (same transcript → same overflow), and
+ * an aborted signal means the user cancelled — neither should be retried.
+ */
+function shouldFallbackRetry(
+  result: YoloClassifierResult,
+  signal: AbortSignal,
+): boolean {
+  return (
+    result.unavailable === true &&
+    result.transcriptTooLong !== true &&
+    !signal.aborted
+  )
+}
+
+/**
+ * Run classifier attempts down the tier chain: primary first, then one retry
+ * per lower tier while the previous attempt failed transiently. Stops at the
+ * first non-retryable outcome (success, parse failure, abort, overflow); the
+ * last result is final.
+ */
+async function classifyYoloActionWithFallback(
+  primaryModel: string,
+  attempt: (model: string) => Promise<YoloClassifierResult>,
+  signal: AbortSignal,
+): Promise<YoloClassifierResult> {
+  let result = await attempt(primaryModel)
+  if (!shouldFallbackRetry(result, signal)) return result
+  const tried = new Set([primaryModel])
+  let lastModel = primaryModel
+  for (const fallbackModel of getClassifierFallbackModels(primaryModel)) {
+    if (!shouldFallbackRetry(result, signal)) break
+    if (tried.has(fallbackModel)) continue
+    tried.add(fallbackModel)
+    logForDebugging(
+      `Auto mode classifier unavailable on ${lastModel}, retrying with ${fallbackModel}`,
+      { level: 'warn' },
+    )
+    result = await attempt(fallbackModel)
+    lastModel = fallbackModel
+  }
+  return result
 }
 
 /**
